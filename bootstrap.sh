@@ -79,7 +79,7 @@ PY
 fi
 
 # ═══════════════ 1. 知识库 ═══════════════
-step "1/3 准备知识库"
+step "1/4 准备知识库"
 if [ -d "$KB/projects" ]; then
   ok "已存在，跳过创建"
   if [ -n "$REMOTE" ] && [ -d "$KB/.git" ]; then
@@ -119,7 +119,7 @@ if [ -d "$KB" ]; then
 fi
 
 # ═══════════════ 2. 安装工具 ═══════════════
-step "2/3 安装工具"
+step "2/4 安装工具"
 if [ -f "$HERE/universal/kb.py" ]; then
   mkdir -p "$HOME/.ai-kb"
   cp "$HERE/universal/kb.py" "$HERE/universal/rules.md" "$HOME/.ai-kb/" 2>/dev/null
@@ -130,7 +130,31 @@ else
 fi
 
 # ═══════════════ 3. 配置 hook ═══════════════
-step "3/3 配置 hook"
+step "3/4 安装 skill（让 agent 自动发现）"
+if [ -f "$HERE/skill/SKILL.md" ]; then
+  INSTALLED_SKILLS=""
+  for agent in workbuddy claude codebuddy; do
+    base="$HOME/.${agent}/skills"
+    # 只装到已存在的 agent 技能目录（说明该 agent 在用）
+    if [ -d "$base" ]; then
+      mkdir -p "$base/ai-kb"
+      if cp "$HERE/skill/SKILL.md" "$base/ai-kb/SKILL.md" 2>/dev/null; then
+        INSTALLED_SKILLS="$INSTALLED_SKILLS $agent"
+      fi
+    fi
+  done
+  if [ -n "$INSTALLED_SKILLS" ]; then
+    ok "已安装 skill 到：$INSTALLED_SKILLS"
+    info "→ agent 会自动读到它，之后你只说「装一下 ai-kb」它就知道怎么做"
+  else
+    info "未检测到 agent 技能目录（~/.workbuddy/skills 等），跳过 skill 安装"
+    info "  想手动装：把 skill/SKILL.md 放到 ~/.workbuddy/skills/ai-kb/ 即可"
+  fi
+else
+  info "仓库里没有 skill/SKILL.md，跳过"
+fi
+
+step "4/4 配置 hook"
 if [ "$NO_HOOK" = "1" ]; then
   info "已跳过（--no-hook）。自动记录会降级，靠全局指令驱动。"
   info "之后想补：./universal/install.sh"
