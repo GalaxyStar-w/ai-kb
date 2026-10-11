@@ -12,20 +12,50 @@
 
 ---
 
-## 30 秒安装
+## 安装：一条命令
 
 ```bash
-git clone <本仓库> && cd ai-kb-tool-repo
-./universal/install.sh --remote <你的私有仓库地址>
+git clone https://github.com/GalaxyStar-w/ai-kb.git
+cd ai-kb
+./bootstrap.sh
 ```
 
-安装脚本会**自动探测你的 agent 平台**（Claude Code / WorkBuddy / CodeBuddy）并配好 hook。
+`bootstrap.sh` 会自动完成：
 
-装完提示：完全重启 agent（WorkBuddy 用 Cmd+Q 彻底退出，关窗口不算）。
+| 步骤 | 做什么 |
+|---|---|
+| 1 | 体检依赖（python3 / git / gh 登录状态） |
+| 2 | 创建知识库骨架 `~/ai-knowledge-base`（或 `--remote` 关联你的私有仓库） |
+| 3 | 安装工具到 `~/.ai-kb/` |
+| 4 | **自动探测你的 agent 平台**并配置 hook |
+| 5 | 跑 `doctor` 体检 + `audit` 盘点 |
 
-验证：
+**装完只需两件事**：
+
+1. **重启 agent**让 hook 生效
+   （WorkBuddy 用 Cmd+Q 彻底退出，关窗口不算；Claude Code 直接重启）
+2. **跟 agent 说一句话**：
+   > 「按 `~/ai-knowledge-base/AI-START-HERE.md` 走」
+
+它就会知道：你是谁、知识库怎么用、有哪些硬性规则、现在该管什么。
+
+### 常用参数
+
 ```bash
-AI_KB_DIR=~/ai-knowledge-base python3 ~/.ai-kb/kb.py doctor
+./bootstrap.sh --check                    # 只体检，什么都不改（推荐新机器先跑）
+./bootstrap.sh --remote <私有仓库地址>      # 关联已有的知识库仓库
+./bootstrap.sh --kb <路径>                 # 指定知识库位置
+./bootstrap.sh --no-hook                   # 不配 hook（无 hook 的 agent 用）
+```
+
+### 不用 agent 也能用
+
+装完后你可以直接用命令：
+
+```bash
+AI_KB_DIR=~/ai-knowledge-base python3 ~/.ai-kb/kb.py doctor   # 体检
+AI_KB_DIR=~/ai-knowledge-base python3 ~/.ai-kb/kb.py search 关键词
+AI_KB_DIR=~/ai-knowledge-base python3 ~/.ai-kb/kb.py audit    # 盘点
 ```
 
 ---
