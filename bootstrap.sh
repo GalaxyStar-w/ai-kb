@@ -37,6 +37,17 @@ die()  { bad "$1"; exit 1; }
 
 printf "\n\033[1m ai-kb 安装程序\033[0m\n知识库位置: %s\n" "$KB"
 
+# Windows 原生环境不支持（需要 WSL / Git Bash + POSIX 工具链）
+case "$(uname -s 2>/dev/null || echo unknown)" in
+  MINGW*|MSYS*|CYGWIN*)
+    printf "\n\033[31m✘ 检测到 Windows 环境\033[0m\n"
+    printf "  本工具需要 POSIX 环境（bash + python3 + git）。Windows 上请用：\n"
+    printf "    · WSL 2（推荐）：wsl --install -d Ubuntu，然后在里面跑本脚本\n"
+    printf "    · Git Bash：安装后从 Git Bash 里运行 bash ./bootstrap.sh\n"
+    printf "  在原生 cmd / PowerShell 里无法运行。\n"
+    exit 1;;
+esac
+
 # ═══════════════ 0. 依赖体检 ═══════════════
 step "检查依赖"
 command -v python3 >/dev/null || die "缺 python3（macOS 自带，Linux 请装 python3）"

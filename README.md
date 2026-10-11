@@ -141,6 +141,10 @@ ai-kb
 
 Claude Code 与 WorkBuddy / CodeBuddy 都实测通过；Codex / Gemini CLI / Cursor / Windsurf 未实测。
 
+**多agent 共用同一知识库**：一台机器上装了多个 agent（既开WorkBuddy 又用 Claude Code）时，
+安装脚本会**给每个都配好 hook**，它们共用同一个知识库目录 —— 谁都能读写同一批记录。
+已实测：双 agent 场景下两个平台的 hook 都正确写入，互不干扰。
+
 **没有 hook 的 agent 也能用**，只是自动化程度低一档。
 
 ---
@@ -401,6 +405,9 @@ cd ai-kb-pack/universal
 - 改规则：编辑 `rules.md`。Stop 检查阈值（约 500 字或改过文件）在 `kb.py` 的 `stop` 分支。
 
 ## 11. 已知局限
+
+**平台**：仅支持 macOS / Linux（需要 bash + python3 + git）。
+**Windows 原生不支持** —— 请用 WSL 2（推荐）或 Git Bash。安装脚本会检测并给出提示。
 
 - 自动记录依赖模型遵守规则；hook 与审计是兜底，不是绝对保证。
 - 只存精炼档案和产物，**不存完整原始对话**：完整性取决于 AI 整理时不遗漏，无法回看对话原文。

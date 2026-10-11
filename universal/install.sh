@@ -34,6 +34,7 @@ detect_agent() {
   echo none
 }
 AGENT="$(detect_agent)"
+AGENT_EXPLICIT=0; [ $# -gt 0 ] && case " $* " in *" --agent "*) AGENT_EXPLICIT=1;; esac
 mkdir -p "$DEST"; cp "$HERE/kb.py" "$HERE/rules.md" "$DEST/"; echo "✔ 脚本已安装到 $DEST"
 if [ -n "$remote" ] && [ ! -d "$KB/.git" ]; then git clone "$remote" "$KB" 2>/dev/null || { mkdir -p "$KB"; git -C "$KB" init -q; git -C "$KB" remote add origin "$remote"; }; fi
 AI_KB_DIR="$KB" python3 "$DEST/kb.py" init
@@ -86,16 +87,32 @@ PYEOF2
   echo "⚠ hook 需**完全重启 agent**（Claude Code: 重新启动；WorkBuddy: Cmd+Q 彻底退出而非关窗口）才会生效"
 }
 
-case "$AGENT" in
-  claude-code) install_hooks "$HOME/.claude/settings.json" claude-code ;;
-  workbuddy)    install_hooks "$HOME/.workbuddy/settings.json" workbuddy ;;
-  codebuddy)    install_hooks "$HOME/.codebuddy/settings.json" codebuddy ;;
-  *) echo "• 未识别 agent 平台，跳过 hook 配置。"
-     echo "  若你的 agent 支持 hooks（Claude Code / WorkBuddy / CodeBuddy 均支持），"
-     echo "  可手动执行：--agent workbuddy（或 claude-code / codebuddy）重跑本脚本。"
-     echo "  完整 hook JSON 见 README 第 5.3 节。"
-     ;;
-esac
+# 给**所有已安装的平台**都配hook —— 一台机器可能同时用多个 agent
+# （例如既开WorkBuddy 又用 Claude Code），它们应共用同一个知识库。
+HOOKED=""
+if [ "$NO_HOOK" != "1" ]; then
+  for plat in claude-code workbuddy codebuddy; do
+    case "$plat" in
+      claude-code) cfg="$HOME/.claude/settings.json";;
+      workbuddy)    cfg="$HOME/.workbuddy/settings.json";;
+      codebuddy)    cfg="$HOME/.codebuddy/settings.json";;
+    esac
+    # 平台目录存在才配（说明该 agent 在用）；--agent 可强制指定单个平台
+    # 自动探测时：给所有已安装平台都配（多agent 共用同一知识库）
+    # --agent 显式指定时：只配那一个
+    if [ -f "$cfg" ] && { [ "$AGENT_EXPLICIT" != "1" ] || [ "$AGENT" = "$plat" ]; }; then
+      install_hooks "$cfg" "$plat"
+      HOOKED="$HOOKED $plat"
+    fi
+  done
+fi
+
+if [ -z "$HOOKED" ]; then
+  echo "• 未识别 agent 平台，跳过 hook 配置。"
+  echo "  若你的 agent 支持 hooks（Claude Code / WorkBuddy / CodeBuddy 均支持），"
+  echo "  可手动执行：--agent workbuddy（或 claude-code / codebuddy）重跑本脚本。"
+  echo "  完整 hook JSON 见 README 第 5.3 节。"
+fi
 for f in "${targets[@]}"; do
   f="${f/#\~/$HOME}"; mkdir -p "$(dirname "$f")"; touch "$f"
   if grep -qF "$MARK" "$f"; then echo "• $f 已包含片段，跳过"
