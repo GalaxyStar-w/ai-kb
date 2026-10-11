@@ -1,0 +1,55 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>文档 · AI 知识总控台</title>
+<style>
+:root{--bg:#FBF6EE;--panel:#FFFDF8;--ink:#4A4039;--muted:#9C8E7E;--line:#EADFCB;
+--primary:#C08357;--primary-d:#A86B43;--radius:12px;--shadow:0 6px 20px rgba(120,90,60,.08)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;line-height:1.75}
+.wrap{max-width:860px;margin:0 auto;padding:24px 18px 80px}
+a{color:var(--primary-d);text-decoration:none}
+.back{display:inline-block;margin-bottom:14px;font-size:14px}
+h1{font-size:19px;margin:0 0 2px;word-break:break-all}
+.sub{color:var(--muted);font-size:12.5px;margin-bottom:18px}
+.doc{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px 26px;box-shadow:var(--shadow);overflow-wrap:break-word}
+.doc h1,.doc h2,.doc h3,.doc h4{margin:20px 0 8px;line-height:1.4}
+.doc h1{font-size:20px}.doc h2{font-size:17px;color:var(--primary-d)}
+.doc h3{font-size:15.5px}.doc h4{font-size:14.5px}
+.doc p{margin:9px 0}
+.doc code{background:#F4ECDD;padding:1px 5px;border-radius:4px;font-size:.9em;font-family:ui-monospace,Menlo,monospace}
+.doc pre{background:#F4ECDD;padding:13px 15px;border-radius:9px;overflow-x:auto;font-size:13px}
+.doc pre code{background:none;padding:0}
+.doc ul,.doc ol{padding-left:24px;margin:9px 0}
+.doc li{margin:4px 0}
+.doc table{border-collapse:collapse;margin:12px 0;display:block;overflow-x:auto;width:100%}
+.doc th,.doc td{border:1px solid var(--line);padding:7px 11px;font-size:13.5px;text-align:left}
+.doc th{background:#F4ECDD;font-weight:600}
+.doc blockquote{border-left:3px solid var(--primary);margin:10px 0;padding:2px 14px;color:var(--muted);background:#FFFDF8}
+.big-warn{background:#FBE9E3;border:1px solid #E8B4A6;color:#A8503C;padding:13px 16px;border-radius:10px;font-size:14px;margin-bottom:18px}
+</style></head><body><div class="wrap">
+<a class="back" id="bk" href="#">← 返回</a>
+<h1 id="ttl">加载中…</h1>
+<div class="sub" id="sttl"></div>
+<div id="warn"></div>
+<div class="doc" id="doc"></div>
+</div>
+<script>
+const qs=new URLSearchParams(location.search);
+const P=qs.get('p'),R=qs.get('r');
+document.getElementById('bk').href='project.html?p='+encodeURIComponent(P);
+document.getElementById('ttl').textContent=P+' / '+R;
+(async()=>{
+  const idx=await (await fetch('search-index.json')).json();
+  const row=idx.rows.find(r=>r.p===P&&r.rel===R);
+  if(!row){document.getElementById('doc').textContent='未找到该文件';return;}
+  document.getElementById('sttl').textContent=(Math.round(row.size/1024))+' KB · '+row.k;
+  if(row.big){
+    document.getElementById('warn').innerHTML=
+      '<div class="big-warn">这是超大文件（'+Math.round(row.size/1024)+' KB，为保证加载速度未生成完整网页）。以下是索引摘要，可在知识库仓库中打开原文件查看全文：</div>';
+    document.getElementById('doc').innerHTML='<pre>'+row.t.replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))+'</pre>';
+    return;
+  }
+  const html=await (await fetch('content/'+P+'/'+R+'.html')).text();
+  document.getElementById('doc').innerHTML=html;
+})();
+</script></body></html>

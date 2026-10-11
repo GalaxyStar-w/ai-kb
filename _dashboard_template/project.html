@@ -1,0 +1,59 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>项目档案 · AI 知识总控台</title>
+<style>
+:root{--bg:#FBF6EE;--panel:#FFFDF8;--ink:#4A4039;--muted:#9C8E7E;--line:#EADFCB;
+--primary:#C08357;--primary-d:#A86B43;--radius:12px;--shadow:0 6px 20px rgba(120,90,60,.08)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;line-height:1.7}
+.wrap{max-width:860px;margin:0 auto;padding:24px 18px}
+a{color:var(--primary-d);text-decoration:none}
+.back{display:inline-block;margin-bottom:16px;font-size:14px}
+h1{margin:0 0 4px;font-size:21px}
+.sub{color:var(--muted);font-size:13px;margin-bottom:18px}
+input{width:100%;padding:10px 13px;border:1px solid var(--line);border-radius:10px;font-size:14.5px;background:#fff;font-family:inherit;margin-bottom:18px}
+.grp{margin-bottom:22px}
+.grp h2{font-size:15px;color:var(--primary-d);margin:0 0 8px;padding-bottom:5px;border-bottom:1px solid var(--line)}
+.item{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 13px;margin-bottom:6px;cursor:pointer;font-size:14.5px;display:flex;justify-content:space-between;gap:10px}
+.item:hover{border-color:var(--primary)}
+.item .sz{color:var(--muted);font-size:12px;white-space:nowrap}
+.badge{font-size:11px;background:rgba(192,131,87,.16);color:var(--primary-d);border-radius:20px;padding:1px 8px;margin-right:6px}
+.big{font-size:11px;background:#E0A96D;color:#fff;border-radius:20px;padding:1px 7px}
+</style></head><body><div class="wrap">
+<a class="back" href="index.html">← 返回总览</a>
+<h1 id="ttl">加载中…</h1>
+<div class="sub" id="sttl"></div>
+<input id="f" placeholder="在本项目内筛选文件…" oninput="render()">
+<div id="list"></div>
+</div>
+<script>
+const P=new URLSearchParams(location.search).get('p');
+let DOCS=[],ALL=[];
+async function boot(){
+  const idx=await (await fetch('search-index.json')).json();
+  ALL=idx.rows.filter(r=>r.p===P);
+  const nav=await (await fetch('nav.json')).json();
+  const meta=nav.projects.find(x=>x.name===P)||{};
+  document.getElementById('ttl').textContent=P;
+  document.getElementById('sttl').textContent=`${meta.files||ALL.length} 个文件 · 待办 ${meta.todo||0} · 待讨论 ${meta.question||0} · 纪要 ${meta.disc||0} · 决议 ${meta.dec||0} · 产物 ${meta.art||0}`;
+  render();
+}
+function render(){
+  const q=document.getElementById('f').value.trim().toLowerCase();
+  const groups={};
+  ALL.filter(r=>!q||r.rel.toLowerCase().includes(q)||r.t.toLowerCase().includes(q))
+     .forEach(r=>{(groups[r.k]=groups[r.k]||[]).push(r)});
+  let h='';
+  for(const [k,arr] of Object.entries(groups)){
+    h+=`<div class="grp"><h2>${k}（${arr.length}）</h2>`;
+    arr.forEach(r=>{
+      h+=`<div class="item" onclick="open1('${r.rel}')"><span><span class="badge">${k}</span>${r.rel}</span>
+      <span class="sz">${r.big?'<span class="big">大文件·仅摘要</span>':(Math.round(r.size/1024)+' KB')}</span></div>`;
+    });
+    h+='</div>';
+  }
+  document.getElementById('list').innerHTML=h||'<div class="sub">没有匹配的文件</div>';
+}
+function open1(rel){location.href='view.html?p='+encodeURIComponent(P)+'&r='+encodeURIComponent(rel);}
+boot();
+</script></body></html>
