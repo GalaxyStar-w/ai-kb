@@ -60,6 +60,33 @@ AI_KB_DIR=~/ai-knowledge-base python3 ~/.ai-kb/kb.py audit    # 盘点
 
 ---
 
+
+---
+
+## 🤖 让 AI 自动知道这个工具（推荐）
+
+把 `skill/SKILL.md` 放到你的 agent 技能目录，AI 就会自动知道有这套东西：
+
+| agent | 放哪 |
+|---|---|
+| WorkBuddy | `~/.workbuddy/skills/ai-kb/SKILL.md` |
+| Claude Code | `~/.claude/skills/ai-kb/SKILL.md` |
+
+**放完之后，用户只要说一句「装一下 ai-kb」**，AI 会自己：
+读 skill → clone 仓库 → 跑 bootstrap → 提醒重启 → 开始按规则工作。
+
+Skill 里写清了：安装命令、三条核心命令、**四条硬性规则**（不许删 / 改文件先问 /只认实测 / 不写凭证）、
+知识库结构、每轮该写什么、回答历史问题的标准流程。
+
+## 🖥 新机器一行命令
+
+```bash
+ai-kb
+```
+
+（首次会自动 clone 工具仓库然后执行 bootstrap。也可以用 `--check` 只体检。）
+
+
 ## 它怎么工作：4 个 hook（自动触发点）
 
 **不用你提醒，AI 自己会记：**
