@@ -98,8 +98,24 @@ else
   mkdir -p "$KB"
   AI_KB_DIR="$KB" python3 "$HERE/universal/kb.py" init >/dev/null 2>&1
   ok "已创建空知识库骨架"
-  info "下一步请创建一个【私有】仓库并关联："
-  printf "\n     cd %s\n     git init && git remote add origin <你的私有仓库地址>\n     git add -A && git commit -m init && git push\n\n" "$KB"
+
+  # 关键：把「AI 怎么用」的两份文件放进知识库，
+  # 否则用户那句「按 AI-START-HERE.md 走」指不到文件，AI 就无从读起。
+  [ -f "$HERE/AI-START-HERE.md" ] && cp "$HERE/AI-START-HERE.md" "$KB/" && ok "已放入 AI-START-HERE.md（agent 的使用入口）"
+  mkdir -p "$KB/_tool"
+  cp -r "$HERE/universal" "$KB/_tool/" 2>/dev/null
+  cp "$HERE/bootstrap.sh" "$KB/_tool/" 2>/dev/null
+  ok "已放入 _tool/（含 bootstrap.sh，换机器时从这里恢复）"
+
+  info "下一步：创建【私有】远程仓库并关联"
+  printf "\n     cd %s\n     git init\n     git remote add origin <你的私有仓库地址>\n     git add -A && git commit -m init && git push\n\n" "$KB"
+  warn "注意：必须用【私有】仓库，工具会拒绝向公开仓库推送"
+fi
+
+# 已有知识库时也确保这两样在（补装场景）
+if [ -d "$KB" ]; then
+  [ -f "$HERE/AI-START-HERE.md" ] && [ ! -f "$KB/AI-START-HERE.md" ] && \
+    cp "$HERE/AI-START-HERE.md" "$KB/" && ok "补装 AI-START-HERE.md"
 fi
 
 # ═══════════════ 2. 安装工具 ═══════════════
