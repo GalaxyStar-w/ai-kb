@@ -1,6 +1,6 @@
 {
   "name": "ai-kb",
-  "version": "2.2.1",
+  "version": "2.3.0",
   "description": "把你和 AI 的所有讨论自动沉淀成个人知识库：待办、问题、决议、讨论纪要、产物，可追溯、可全文搜索、脱离会话也能完整理解，并可同步到你自己的私有 GitHub 仓库。",
   "keywords": ["knowledge-base", "notes", "todo", "memory", "github-sync"],
   "author": { "name": "ai-kb contributors" }

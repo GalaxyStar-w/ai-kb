@@ -10,7 +10,7 @@
 换台电脑       → 什么都没有      换台电脑       → git clone 就有了
 ```
 
-版本 **v2.2.1**（更新记录见 [CHANGELOG.md](CHANGELOG.md)）。仅需 `python3` + `git`；加密看板另需 `node`。
+版本 **v2.3.0**（更新记录见 [CHANGELOG.md](CHANGELOG.md)）。仅需 `python3` + `git`；加密看板另需 `node`。
 
 ---
 
@@ -93,6 +93,7 @@ git clone https://github.com/GalaxyStar-w/ai-kb.git && cd ai-kb
 | `status` | 各项目统计与同步状态 |
 | **`doctor`** | **体检**：依赖 / 结构 / 仓库可见性 / 同步状态 / 路径映射 / 项目识别 / 看板安全，一次查完并给人话结论（**只读**） |
 | **`audit`** | **盘点**：确认「所有内容都在」（只读） |
+| **`coverage`** | **会话覆盖度**：盘点本机各 agent 的会话与知识库的对应关系（已整理/已覆盖/部分/未整理/轻量），生成会话台账 `_meta/session-ledger.md`，让「有没有遗漏」随时可验证（只读会话；`--no-write` 只看不写台账） |
 | `build` | 重新生成各项目 README 自动区块与根总页 |
 | `sync` | 提交 + 拉取 + 推送（含私有校验与密钥扫描） |
 | `init` | 初始化骨架（幂等） |
@@ -246,7 +247,7 @@ python3 extract_sessions.py --all ~/kb-extract [--source claude|workbuddy]
 
 正常工作即可。想主动操作时直接说：「看下总页 / 还有什么没做」「之前为什么决定 X」「搜一下知识库里关于 Y」「整理一下这个项目的档案」「审计一下最近有没有漏记」「同步到 GitHub」。
 
-**自测**：`bash universal/selftest.sh`（62 项，在临时知识库里跑，不碰真实数据；macOS 自带 bash 3.2 可直接运行）。涵盖：初始化与项目识别、总页与搜索、密钥拦截、推送保险、安装器改配置的安全性、bootstrap 与 `_tool/` 完整性、`doctor`/`audit`/`export`/`clean-stale`、看板加密（含错误口令、密文无明文泄露、确定性）、会话脱敏。
+**自测**：`bash universal/selftest.sh`（72 项，在临时知识库里跑，不碰真实数据；macOS 自带 bash 3.2 可直接运行）。涵盖：初始化与项目识别、总页与搜索、密钥拦截、推送保险、安装器改配置的安全性、bootstrap 与 `_tool/` 完整性、`doctor`/`audit`/`export`/`clean-stale`、看板加密（含错误口令、密文无明文泄露、确定性）、会话脱敏。
 
 ---
 

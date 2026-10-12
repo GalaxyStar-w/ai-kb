@@ -11,6 +11,7 @@ hook 模式（stdin 传 JSON）: sessionstart | precompact | prompt | stop
   sync               手动：提交 + 拉取 + 推送（带私有仓库与密钥检查）
   audit              盘点：列出所有项目/文件数/体积/提交数，纯只读，用于确认「内容都在」（v2 新增）
   doctor             体检：依赖/结构/远程可见性/同步状态/路径映射/项目识别 一次查完（v2 新增）
+  coverage           盘点本机所有 AI 会话与知识库的对应关系，生成会话台账 _meta/session-ledger.md（只读会话）
   clean-stale        清理指向已不存在目录的路径映射（预览；KB_CONFIRM=1 才真删）（v2 新增）
   export [路径]      把整个知识库导出成单个 markdown，便于离线阅读/分享（v2 新增）
 知识库目录：环境变量 AI_KB_DIR（兼容 CLAUDE_TRACKER_DIR），默认 ~/ai-knowledge-base。
@@ -20,7 +21,7 @@ hook 模式（stdin 传 JSON）: sessionstart | precompact | prompt | stop
    历史案例：一份实战纪要曾被当「测试残留」删除，事后才从 git 历史恢复。
 任何异常在 hook 模式下静默退出，绝不影响正常对话。
 """
-import sys, os, re, json, subprocess, hashlib, datetime, shutil, time
+import sys, os, re, json, subprocess, hashlib, datetime, shutil, time, collections
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -38,7 +39,10 @@ STATUSF = os.path.join(META, ".sync-status.json")
 BLOCKF = os.path.join(META, "SYNC_BLOCKED.md")
 HAS_GIT = shutil.which("git") is not None
 mode = sys.argv[1] if len(sys.argv) > 1 else ""
-VERSION = "2.2.1"
+VERSION = "2.3.0"
+ROOT_CAP_TODO = 15      # 总页每个项目最多列出的未完成待办条数
+ROOT_CAP_Q = 10         # 总页每个项目最多列出的未决问题条数
+CTX_CAP = 9000          # 会话开场注入：待办/问题清单各自的字符上限
 HOOK_MODES = ("sessionstart", "precompact", "prompt", "stop")
 today = datetime.date.today().isoformat()
 NON_PROJECT_PREFIXES = ("/tmp/", "/private/tmp/", "/private/var/", "/var/folders/")
@@ -299,20 +303,35 @@ def build():
             write(p, text)
         rows.append(f"| [{n}](projects/{n}/README.md) | {s['t_open']} | {s['q_open']} | {len(s['disc'])} | {len(s['dec'])} | {len(s['art'])} | {s['last']} |")
         d = os.path.join(PROJ, n)
+        # 总页每个项目最多列出若干条，其余只提示数量（完整清单在各项目 todo.md / questions.md）：
+        # 补录大量历史会话后，未完成项可能上百条，全列出来会让总页无法阅读。
+        shown_t = shown_q = more_t = more_q = 0
         for l in open_part(read(os.path.join(d, "todo.md")), "## 已完成").splitlines():
             if l.startswith("- [ ]"):
+                if shown_t >= ROOT_CAP_TODO:
+                    more_t += 1
+                    continue
+                shown_t += 1
                 # T-21：若该行在源文件里带 kb-allow，复制到总页时必须保留，
                 # 否则源文件已放行、总页却重新触发密钥扫描拦截（整批不提交）。
                 body = l[6:]
                 if "kb-allow" not in body and hits_secret(body):
                     body = body.rstrip() + "（kb-allow：由源文件推断为误报）"
                 open_todos.append(f"- **{n}** {body}")
+        if more_t:
+            open_todos.append(f"- **{n}** …另有 {more_t} 条未完成待办未在此列出，见 [projects/{n}/todo.md](projects/{n}/todo.md)")
         for l in open_part(read(os.path.join(d, "questions.md")), "## 已决议").splitlines():
             if l.startswith("- Q-"):
+                if shown_q >= ROOT_CAP_Q:
+                    more_q += 1
+                    continue
+                shown_q += 1
                 body = l[2:]
                 if "kb-allow" not in body and hits_secret(body):
                     body = body.rstrip() + "（kb-allow：由源文件推断为误报）"
                 open_qs.append(f"- **{n}** {body}")
+        if more_q:
+            open_qs.append(f"- **{n}** …另有 {more_q} 个未决问题未在此列出，见 [projects/{n}/questions.md](projects/{n}/questions.md)")
         for l in s["log_tail"]: recent.append((l[2:12], f"- **{n}** {l[2:]}"))
     recent.sort(key=lambda x: x[0], reverse=True)
     root = ["# AI 知识库总页", "",
@@ -327,8 +346,10 @@ def build():
             "## 让新的 AI agent 接入这个知识库",
             "对它说一句：“阅读并执行本仓库 `_tool/AGENT-SETUP.md`”。它会自己完成前置检查、隔离自测、安装、权限申请和验收汇报，不需要你再提供额外信息。", "",
             "## 项目总览", "", "| 项目 | 未完成待办 | 未决问题 | 讨论纪要 | 决议 | 产物 | 最近更新 |", "|---|---|---|---|---|---|---|"] + rows
-    root += ["", f"## 全部未完成待办（{len(open_todos)}）"] + (open_todos or ["- （暂无）"])
-    root += ["", f"## 全部未决问题（{len(open_qs)}）"] + (open_qs or ["- （暂无）"])
+    total_t = sum(int(r.split("|")[2]) for r in rows)
+    total_q = sum(int(r.split("|")[3]) for r in rows)
+    root += ["", f"## 全部未完成待办（共 {total_t}；每个项目最多列出 {ROOT_CAP_TODO} 条）"] + (open_todos or ["- （暂无）"])
+    root += ["", f"## 全部未决问题（共 {total_q}；每个项目最多列出 {ROOT_CAP_Q} 条）"] + (open_qs or ["- （暂无）"])
     root += ["", "## 最近更新（全部项目）"] + ([r[1] for r in recent[:15]] or ["- （暂无）"]) + [""]
     new = "\n".join(root)
     rp = os.path.join(KB, "README.md")
@@ -458,6 +479,18 @@ def rules_text():
     return read(os.path.join(HERE, "rules.md")).replace("{KB}", KB)
 
 
+def cap_section(text, path, limit=None):
+    """会话开场注入的清单过长时，在行边界截断并提示剩余数量（完整内容仍在文件里）。
+    补录大量历史会话后未完成项可能上百条，全部注入会淹没真正要紧的内容。"""
+    limit = limit or CTX_CAP
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit("\n", 1)[0]
+    rest = text[len(cut):]
+    n = len(re.findall(r"^- (?:\[ \]|Q-)", rest, re.M))
+    return cut + f"\n…（已截断：还有 {n} 条未显示；完整清单见 {path}。注入里优先放在前面的是较新/较要紧的条目）"
+
+
 def build_context(name, root):
     d = os.path.join(PROJ, name)
     script = os.path.abspath(__file__)
@@ -480,8 +513,8 @@ def build_context(name, root):
     s = stats(name)
     parts.append(f"\n## 当前项目首页（README.md）\n{readme}")
     parts.append(f"\n### 详细档案（按需读取，不在此展开）\n讨论纪要 {len(s['disc'])} 篇（最近：{', '.join(s['disc'][-3:]) or '无'}），决议 {len(s['dec'])} 条，产物 {len(s['art'])} 个。位于 {d}/discussions|decisions|artifacts。")
-    parts.append("\n## 未完成待办（todo.md）\n" + open_part(read(os.path.join(d, "todo.md")), "## 已完成").strip())
-    parts.append("\n## 未决问题（questions.md）\n" + open_part(read(os.path.join(d, "questions.md")), "## 已决议").strip())
+    parts.append("\n## 未完成待办（todo.md）\n" + cap_section(open_part(read(os.path.join(d, "todo.md")), "## 已完成").strip(), os.path.join(d, "todo.md")))
+    parts.append("\n## 未决问题（questions.md）\n" + cap_section(open_part(read(os.path.join(d, "questions.md")), "## 已决议").strip(), os.path.join(d, "questions.md")))
     # T-36：新会话开场最需要的是「现在该管什么」，而不是面对几十条平铺的清单。
     urgent = urgent_items()
     if urgent:
@@ -655,6 +688,195 @@ def cmd_doctor():
     return 1 if fail else 0
 
 
+
+# ---------- 会话覆盖度（coverage）：「有没有遗漏」随时可验证 ----------
+SESSION_SOURCES = (("claude-code", "~/.claude/projects"), ("workbuddy", "~/.workbuddy/projects"), ("codebuddy", "~/.codebuddy/projects"))
+_PATH_RE = re.compile(r"[\w][\w./-]{2,}\.(?:py|md|sql|ya?ml|json|tsx?|jsx?|html|sh|toml|csv)\b")
+_SNAKE_RE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+){2,}\b")
+_PR_RE = re.compile(r"\bPR-\d+\b")
+_COMMON_TERMS = {"__init__", "__main__", "package.json", "readme.md", "claude.md", "todo.md", "log.md", "questions.md",
+                 "glossary.md", "settings.json", "tool_use_id", "tool_result"}
+
+
+def _parse_ts(t):
+    if isinstance(t, (int, float)):
+        return datetime.datetime.fromtimestamp(t / 1000 if t > 1e11 else t).astimezone()
+    if not t:
+        return None
+    t = str(t).replace("Z", "+00:00")
+    try:
+        d = datetime.datetime.fromisoformat(t)
+    except ValueError:
+        try:
+            d = datetime.datetime.fromisoformat(re.sub(r"\.\d+", "", t))
+        except ValueError:
+            return None
+    return d if d.tzinfo else d.astimezone()
+
+
+def _msg_text(c):
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        return "\n".join(b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") in ("text", "input_text", "output_text"))
+    return ""
+
+
+def _real_user(s):
+    s = re.sub(r"<system-reminder.*?</system-reminder>", "", s, flags=re.S)
+    s = re.sub(r"<(?:command-name|command-message|command-args|local-command-stdout|task-notification)\b.*?</[a-z-]+>", "", s, flags=re.S)
+    s = re.sub(r"(?m)^(UserPromptSubmit|SessionStart|Stop|PreCompact) hook.*$", "", s)
+    s = re.sub(r"(?m)^\[(知识库|清单)提醒\].*$", "", s)
+    return s.strip()
+
+
+def _top_terms(text, n=40):
+    c = collections.Counter()
+    for rx in (_PATH_RE, _SNAKE_RE, _PR_RE):
+        for m in rx.finditer(text):
+            c[m.group(0).lower()] += 1
+    terms = [(t, k) for t, k in c.items() if k >= 2 and t not in _COMMON_TERMS and len(t) >= 5]
+    terms.sort(key=lambda x: -x[1])
+    return [t for t, _ in terms[:n]]
+
+
+def scan_sessions():
+    """遍历本机各 agent 的会话文件，只读，返回元数据与抽取出的标识符（不保留原文）。"""
+    out = []
+    for label, base in SESSION_SOURCES:
+        base = os.path.expanduser(base)
+        if not os.path.isdir(base):
+            continue
+        for d in sorted(os.listdir(base)):
+            dp = os.path.join(base, d)
+            if not os.path.isdir(dp):
+                continue
+            for f in sorted(os.listdir(dp)):
+                if not f.endswith(".jsonl"):
+                    continue
+                path = os.path.join(dp, f)
+                uturns, achars, first, last, title, cwd, sid, buf = 0, 0, None, None, "", "", None, []
+                try:
+                    with open(path, encoding="utf-8", errors="replace") as fh:
+                        for line in fh:
+                            try:
+                                x = json.loads(line)
+                            except Exception:
+                                continue
+                            t = x.get("type")
+                            if t in ("custom-title", "ai-title"):
+                                title = x.get("customTitle") or x.get("aiTitle") or title
+                            elif t in ("user", "assistant") and not x.get("isSidechain"):
+                                sid = sid or x.get("sessionId")
+                                cwd = cwd or x.get("cwd") or ""
+                                ts = _parse_ts(x.get("timestamp"))
+                                if ts:
+                                    first = first or ts
+                                    last = ts
+                                body = _msg_text((x.get("message") or {}).get("content"))
+                                if t == "user":
+                                    body = _real_user(body)
+                                    if len(body) > 1:
+                                        uturns += 1
+                                else:
+                                    achars += len(body)
+                                buf.append(body)
+                except Exception:
+                    continue
+                if not first:
+                    continue
+                out.append(dict(src=label, sid=sid or f[:8], cwd=cwd, title=title, first=first, last=last,
+                                user_turns=uturns, asst_chars=achars, terms=_top_terms("\n".join(buf))))
+    return out
+
+
+def _kb_corpus():
+    parts = []
+    for dp, dn, fn in os.walk(PROJ):
+        dn[:] = [x for x in dn if not x.startswith(".")]
+        for f in fn:
+            if f.endswith((".md", ".html", ".txt", ".sql", ".py", ".json", ".yaml", ".yml", ".csv")):
+                try:
+                    parts.append(read(os.path.join(dp, f)).lower())
+                except Exception:
+                    pass
+    return "\n".join(parts)
+
+
+def _kb_commits():
+    if not (HAS_GIT and os.path.isdir(os.path.join(KB, ".git"))):
+        return []
+    out = git("log", "--name-only", "--format=@@%cI").stdout
+    res, cur = [], None
+    for line in out.splitlines():
+        if line.startswith("@@"):
+            cur = [_parse_ts(line[2:]), set()]
+            res.append(cur)
+        elif cur is not None and line.startswith("projects/"):
+            cur[1].add(line.split("/")[1])
+    return [(t, p) for t, p in res if t and p]
+
+
+def cmd_coverage(write=True):
+    """盘点本机 AI 会话 ↔ 知识库：每个会话是否被整理，并生成 _meta/session-ledger.md。
+    判断依据（启发式，按强弱）：①知识库里出现该会话号前 8 位（补录/自动记录会写入）→ 已整理；
+    ②从会话抽取最常出现的独特标识符（文件名/表名/函数名/PR 号，≤40 个），在知识库里出现的比例：≥80% 已覆盖，50–80% 部分覆盖，<50% 未整理；
+    ③会话期间知识库有提交 → 有写入痕迹。<3 条用户发言的视为轻量会话，不判断。"""
+    sess = scan_sessions()
+    if not sess:
+        print("没有找到本机的会话目录（~/.claude/projects、~/.workbuddy/projects、~/.codebuddy/projects）")
+        return 0
+    corpus = _kb_corpus()
+    commits = _kb_commits()
+    first_kb = min((t for t, _ in commits), default=None)
+    rows = []
+    for s in sess:
+        name = project(s["cwd"], persist=False)[0] if s["cwd"] else "_general"
+        lo, hi = s["first"] - datetime.timedelta(minutes=2), s["last"] + datetime.timedelta(minutes=30)
+        wrote = any(lo <= t <= hi for t, _ in commits)
+        id_hit = bool(s["sid"]) and s["sid"][:8] in corpus
+        pct = (sum(1 for t in s["terms"] if t in corpus) / len(s["terms"])) if len(s["terms"]) >= 5 else None
+        if s["user_turns"] < 3:
+            st, basis = "轻量·未判断", "发言<3"
+        elif id_hit:
+            st, basis = "已整理", "知识库含会话号"
+        elif pct is not None:
+            st = "已覆盖" if pct >= 0.8 else ("部分覆盖" if pct >= 0.5 else "未整理")
+            basis = f"标识符命中 {pct*100:.0f}%" + ("；会话期间有写入" if wrote else "")
+        elif wrote:
+            st, basis = "有写入痕迹", "会话期间知识库有提交（无法量化）"
+        else:
+            st, basis = "无法判断", "讨论类，标识符不足"
+        pre = first_kb is not None and s["last"] < first_kb
+        rows.append(dict(s, project=name, status=st, basis=basis, pre=pre))
+    rows.sort(key=lambda r: r["first"])
+    cnt = collections.Counter(r["status"] for r in rows)
+    heavy = [r for r in rows if r["user_turns"] >= 3]
+    hc = collections.Counter(r["status"] for r in heavy)
+    print(f"本机会话 {len(rows)} 个（来源：{', '.join(sorted(set(r['src'] for r in rows)))}）；其中实质性（≥3 条发言）{len(heavy)} 个")
+    print("状态分布（全部）：", dict(cnt))
+    print("状态分布（实质性）：", dict(hc))
+    gaps = [r for r in heavy if r["status"] in ("未整理", "部分覆盖")]
+    if gaps:
+        print(f"\n需要关注（未整理/部分覆盖，共 {len(gaps)} 个）：")
+        for r in sorted(gaps, key=lambda r: -r["user_turns"])[:15]:
+            print(f"  {r['first'].strftime('%m-%d')} {r['project'][:18]:18} {r['user_turns']:>3}发言 {r['status']}  {(r['title'] or '(无标题)')[:36]}")
+    if write:
+        lines = ["# 会话台账（由 `kb.py coverage` 自动生成，请勿手改）", "",
+                 f"> 生成于 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}。盘点本机各 AI agent 的会话与知识库的对应关系，用来回答「有没有遗漏」。",
+                 "> 判断是启发式的：知识库含会话号=已整理；否则看会话里的文件名/表名/函数名在知识库里出现的比例。", "",
+                 "| 状态 | 数量 |", "|---|---|"] + [f"| {k} | {v} |" for k, v in cnt.most_common()] + ["",
+                 "| 会话 | 来源 | 日期 | 项目 | 发言 | 状态 | 依据 | 标题 |", "|---|---|---|---|---|---|---|---|"]
+        for r in rows:
+            lines.append(f"| {r['sid'][:8]} | {r['src']} | {r['first'].strftime('%Y-%m-%d')} | {r['project']} | {r['user_turns']} | {r['status']} | {r['basis']} | {(r['title'] or '').replace('|', '/')[:40]} |")
+        write_p = os.path.join(META, "session-ledger.md")
+        os.makedirs(META, exist_ok=True)
+        with open(write_p, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+        print(f"\n台账已写入 {write_p}")
+    return 0
+
+
 def cmd_clean_stale():
     """清理 _meta/map.json 里指向已不存在目录的路径映射（不动任何项目内容）。"""
     m = load_json(MAPF, {})
@@ -758,6 +980,8 @@ def main():
         return
     if mode == "audit":
         sys.exit(cmd_audit())
+    if mode == "coverage":
+        sys.exit(cmd_coverage(write="--no-write" not in sys.argv))
     if mode == "doctor":
         sys.exit(cmd_doctor())
     if mode == "clean-stale":

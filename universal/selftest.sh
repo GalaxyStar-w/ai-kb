@@ -110,6 +110,22 @@ O="${T}/otherproj"; mkdir -p "${O}"; git -C "${O}" init -q
 ( cd "${O}" && echo "{\"cwd\":\"${O}\"}" | python3 "${KBPY}" prompt >/dev/null 2>&1 )
 [ -d "${AI_KB_DIR}/projects/otherproj" ]; ok $? "而 hook 模式（agent 真在该目录工作）仍会正常登记"
 
+echo "[6.7] 超长清单：会话注入与总页自动截断"
+python3 - "${KP}" <<'EOF'
+import sys
+p = sys.argv[1] + "/todo.md"
+s = open(p, encoding="utf-8").read()
+many = "".join("- [ ] T-%d [优化|中] 压力测试条目 %d 说明文字说明文字说明文字说明文字说明文字说明文字说明文字说明文字说明文字\n" % (900 + i, i) for i in range(300))
+open(p, "w", encoding="utf-8").write(s.replace("## 未完成\n", "## 未完成\n" + many, 1))
+EOF
+python3 "${KBPY}" build >/dev/null 2>&1
+SECL="$(cd "${P}" && python3 "${KBPY}" context 2>&1 | python3 -c 'import sys; t=sys.stdin.read(); a=t.index("## 未完成待办"); b=t.index("## 未决问题"); print(b-a)')"
+[ "${SECL}" -lt 10500 ]; ok $? "300 条未完成待办时，会话注入里的待办段仍只有约 ${SECL} 字符（上限约 9000，不截断则会超过 30000）"
+(cd "${P}" && python3 "${KBPY}" context 2>&1) | grep -q "已截断：还有"; ok $? "被截断时提示了剩余条数和完整清单位置"
+RL="$(wc -l < "${AI_KB_DIR}/README.md" | tr -d ' ')"
+[ "${RL}" -lt 120 ]; ok $? "总页每个项目最多列出 15 条（总页 ${RL} 行，不会被淹没）"
+grep -q "共 3[0-9][0-9]" "${AI_KB_DIR}/README.md"; ok $? "总页标题仍显示真实总数"
+
 echo "[7] doctor / audit / export / clean-stale"
 [ -f "${AI_KB_DIR}/_meta/map.json" ] && cp "${AI_KB_DIR}/_meta/map.json" "${T}/map.before" || echo '{}' > "${T}/map.before"
 python3 "${KBPY}" doctor 2>&1 | grep -q "ai-kb v"; ok $? "doctor 可运行并显示版本"
@@ -165,6 +181,32 @@ assert m.redact("普通的一句话，没有任何密钥") == "普通的一句�
 EOF
   ok $? "会话原文里的疑似凭证被替换为 <REDACTED>，普通文本不受影响"
 else echo "  - 跳过（找不到 extract_sessions.py）"; fi
+
+echo "[9.5] coverage：本机会话与知识库的对应关系"
+H7="${T}/h7"; mkdir -p "${H7}/.claude/projects/-Users-x-covproj" "${T}/kb-cov/_meta" "${T}/kb-cov/projects/covproj/discussions"
+python3 - "${H7}" "${T}/kb-cov" <<'EOF'
+import json, sys
+H, K = sys.argv[1], sys.argv[2]
+def sess(sid, n, terms, title):
+    L = [{"type": "custom-title", "customTitle": title}]
+    for i in range(n):
+        L.append({"type": "user", "sessionId": sid, "cwd": "/Users/x/covproj", "timestamp": "2026-10-0%dT0%d:00:00.000Z" % (1 + i % 5, i % 9), "uuid": "u%s%d" % (sid, i), "message": {"content": "请看 %s 的问题 %d" % (terms, i)}})
+        L.append({"type": "assistant", "sessionId": sid, "cwd": "/Users/x/covproj", "timestamp": "2026-10-0%dT0%d:01:00.000Z" % (1 + i % 5, i % 9), "uuid": "a%s%d" % (sid, i), "message": {"content": [{"type": "text", "text": "处理 " + terms}]}})
+    return L
+w = lambda p, L: open(p, "w").write("\n".join(json.dumps(x) for x in L))
+w(H + "/.claude/projects/-Users-x-covproj/s1.jsonl", sess("aaaaaaaa-1", 5, "src/alpha_beta_gamma.py delta_epsilon_zeta.sql theta_iota_kappa lambda_mu_nu.py xi_omicron_pi rho_sigma_tau.md", "已覆盖会话"))
+w(H + "/.claude/projects/-Users-x-covproj/s2.jsonl", sess("bbbbbbbb-2", 5, "zzz_unknown_one.py zzz_unknown_two.sql zzz_unknown_three zzz_unknown_four.md zzz_unknown_five.json zzz_unknown_six.py", "没整理的会话"))
+w(H + "/.claude/projects/-Users-x-covproj/s3.jsonl", sess("cccccccc-3", 1, "x", "轻量会话"))
+w(H + "/.claude/projects/-Users-x-covproj/s4.jsonl", sess("dddddddd-4", 5, "qqq_other_one.py qqq_other_two.sql qqq_other_three qqq_other_four.md qqq_other_five.json qqq_other_six.py", "含会话号的会话"))
+open(K + "/projects/covproj/discussions/n.md", "w").write("# n\nsrc/alpha_beta_gamma.py delta_epsilon_zeta.sql theta_iota_kappa lambda_mu_nu.py xi_omicron_pi rho_sigma_tau.md\n补录自会话 dddddddd\n")
+EOF
+COV="$(HOME="${H7}" AI_KB_DIR="${T}/kb-cov" python3 "${KBPY}" coverage 2>&1)"
+echo "${COV}" | grep -q "已覆盖"; ok $? "coverage 识别出已覆盖的会话（知识库里有其标识符）"
+echo "${COV}" | grep -q "未整理"; ok $? "coverage 识别出未整理的会话"
+echo "${COV}" | grep -q "轻量"; ok $? "发言少于 3 条的会话标为轻量，不做判断"
+grep -q "| dddddddd |.*已整理" "${T}/kb-cov/_meta/session-ledger.md"; ok $? "知识库里含会话号的会话标为「已整理」"
+[ -s "${T}/kb-cov/_meta/session-ledger.md" ]; ok $? "生成了会话台账 _meta/session-ledger.md"
+HOME="${H7}" AI_KB_DIR="${T}/kb-cov" python3 "${KBPY}" coverage --no-write >/dev/null 2>&1; ok $? "coverage --no-write 可运行（不写台账）"
 
 echo "[10] 一致性"
 python3 "$KBPY" status >/dev/null 2>&1; ok $? "status 可运行"
