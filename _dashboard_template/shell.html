@@ -1,0 +1,119 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<meta name="referrer" content="no-referrer">
+<title>🔒 AI 知识总控台</title>
+<style>
+:root{--bg:#FBF6EE;--panel:#FFFDF8;--ink:#4A4039;--muted:#9C8E7E;--line:#EADFCB;--primary:#C08357;--primary-d:#A86B43}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;line-height:1.6;min-height:100vh;display:flex;align-items:center;justify-content:center}
+#gate{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px 26px;width:min(380px,92vw);box-shadow:0 8px 28px rgba(120,90,60,.10)}
+h1{margin:0 0 4px;font-size:19px}
+.sub{color:var(--muted);font-size:13px;margin-bottom:18px}
+input[type=password]{width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:10px;font-size:16px;background:#fff}
+button{width:100%;margin-top:12px;padding:12px;border:0;border-radius:10px;background:var(--primary);color:#fff;font-size:15px;cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}
+label{display:block;margin-top:12px;font-size:13px;color:var(--muted);cursor:pointer}
+#msg{margin-top:12px;font-size:13px;min-height:18px;color:var(--primary-d)}
+#msg.err{color:#C0392B}
+</style></head><body>
+<form id="gate" autocomplete="on" onsubmit="return false">
+  <h1>🔒 AI 知识总控台</h1>
+  <div class="sub">内容已端到端加密，输入口令后在本地解密。</div>
+  <input type="password" id="pw" placeholder="口令" autocomplete="current-password" autofocus>
+  <label><input type="checkbox" id="rem"> 在这台设备上记住（下次免输）</label>
+  <button id="go" type="submit">解锁</button>
+  <div id="msg"></div>
+</form>
+<script>
+(()=>{
+'use strict';
+const enc=new TextEncoder(), dec=new TextDecoder();
+const _fetch=window.fetch.bind(window);          // 原生 fetch：只用于取密文，解密后的页面用的是下面被替换的 fetch
+const SK='kb.master';
+let MASTER=null, KEY=null, MAN=null;
+
+const b64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+const toB64=u=>btoa(String.fromCharCode(...u));
+const msg=(t,err)=>{const m=document.getElementById('msg');if(m){m.textContent=t;m.className=err?'err':'';}};
+
+async function aesKey(raw){return crypto.subtle.importKey('raw',raw,'AES-GCM',false,['decrypt']);}
+async function derive(pass,p){
+  const base=await crypto.subtle.importKey('raw',enc.encode(pass),'PBKDF2',false,['deriveBits']);
+  return new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:b64(p.salt),iterations:p.iter},base,256));
+}
+async function fetchBlob(id){
+  const r=await _fetch('/vault/'+id+'.enc',{cache:'no-cache'});
+  if(!r.ok) throw new Error('missing '+id);
+  return new Uint8Array(await r.arrayBuffer());
+}
+async function decryptBlob(blob){
+  return new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv:blob.slice(0,12)},KEY,blob.slice(12)));
+}
+async function unlockWith(raw){
+  MASTER=raw; KEY=await aesKey(raw);
+  MAN=JSON.parse(dec.decode(await decryptBlob(await fetchBlob('manifest'))));   // 解不开=口令错误
+}
+const ctype=r=>r.endsWith('.json')?'application/json; charset=utf-8':'text/html; charset=utf-8';
+const lookup=rel=>{
+  if(MAN.files[rel]) return MAN.files[rel];
+  for(const f of ['NFC','NFD']){const k=rel.normalize(f); if(MAN.files[k]) return MAN.files[k];}
+  return null;
+};
+
+function installFetchShim(){
+  window.fetch=async function(input,init){
+    const u=new URL(typeof input==='string'?input:input.url,location.href);
+    if(u.origin===location.origin && !u.pathname.startsWith('/vault/')){
+      const rel=decodeURIComponent(u.pathname).replace(/^\//,'');
+      const id=lookup(rel);
+      if(id){
+        const plain=await decryptBlob(await fetchBlob(id));
+        return new Response(plain,{status:200,headers:{'Content-Type':ctype(rel)}});
+      }
+      return new Response('not found',{status:404});
+    }
+    return _fetch(input,init);
+  };
+}
+
+async function showPage(){
+  const name=/project\.html$/.test(location.pathname)?'project.html':/view\.html$/.test(location.pathname)?'view.html':'index.html';
+  const id=lookup(name);
+  if(!id){msg('找不到页面 '+name,true);return;}
+  const html=dec.decode(await decryptBlob(await fetchBlob(id)));
+  installFetchShim();
+  document.open(); document.write(html); document.close();
+  const b=document.createElement('button');
+  b.textContent='🔒 锁定';
+  b.style.cssText='position:fixed;right:14px;bottom:14px;width:auto;padding:8px 14px;margin:0;border:0;border-radius:20px;background:#A86B43;color:#fff;font-size:13px;cursor:pointer;z-index:99999;opacity:.85';
+  b.onclick=()=>{sessionStorage.removeItem(SK);localStorage.removeItem(SK);location.href='/';};
+  document.body.appendChild(b);
+}
+
+async function tryStored(){
+  const s=sessionStorage.getItem(SK)||localStorage.getItem(SK);
+  if(!s) return false;
+  try{await unlockWith(b64(s)); await showPage(); return true;}
+  catch(e){sessionStorage.removeItem(SK);localStorage.removeItem(SK);return false;}
+}
+
+document.getElementById('gate').addEventListener('submit',async()=>{
+  const pw=document.getElementById('pw').value, go=document.getElementById('go');
+  if(!pw) return;
+  go.disabled=true; msg('正在派生密钥（约 1 秒）…');
+  try{
+    const p=await (await _fetch('/vault/params.json',{cache:'no-cache'})).json();
+    const raw=await derive(pw,p);
+    try{await unlockWith(raw);}catch(e){msg('口令不对',true);go.disabled=false;return;}
+    const s=toB64(raw);
+    sessionStorage.setItem(SK,s);
+    if(document.getElementById('rem').checked) localStorage.setItem(SK,s);
+    await showPage();
+  }catch(e){msg('出错了：'+e.message,true);go.disabled=false;}
+});
+
+if(!window.isSecureContext||!crypto.subtle){msg('需要 HTTPS 才能解密（浏览器 WebCrypto 限制）',true);}
+else tryStored();
+})();
+</script></body></html>

@@ -3,3 +3,15 @@ __pycache__/
 *.backup*
 *.orig-*
 .DS_Store
+
+# 杂散临时文件（编辑器/工具写文件时的 mktemp 残留，如 bootstrap.shFag85S）
+*.sh??????
+*.py??????
+*.md??????
+*.bak-ai-kb-*
+# 看板口令/令牌/盐/构建产物绝不入库
+dashboard_pass
+cf_token
+dashboard_salt
+dashboard_out/
+dashboard_local/

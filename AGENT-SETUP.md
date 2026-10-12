@@ -33,13 +33,13 @@ ai-kb 把用户和 AI 的所有讨论沉淀成**个人知识库**（用户自己
 **三个平台都支持 hooks，配置格式与 Claude Code 同构**（写 `hooks` 字段，四事件：
 `SessionStart` / `UserPromptSubmit` / `PreCompact` / `Stop`）。
 
-**装之前先备份**：`cp <配置文件> <配置文件>.backup-before-aikb`。
+**装之前先备份**：`install.sh` 改配置前会**自动备份**为 `<配置文件>.bak-ai-kb-<时间戳>`，并且只在能严格解析 JSON 时才修改（解析失败会跳过、保持原文件不变）。你也可以手动再备一份：`cp <配置文件> <配置文件>.backup-before-aikb`。
 
 **装完必须提示用户**：完全重启 agent 才生效
 （Claude Code 重新启动；WorkBuddy **Cmd+Q 彻底退出**，关窗口不算 —— 它有常驻进程）。
 
 > 完整的 hook JSON 见 `universal/README.md` 第 5.3 节，或直接跑
-> `./universal/install.sh --agent workbuddy`（会自动写好，幂等，不影响配置里其他内容）。
+> `./universal/install.sh --agent workbuddy`（自动写好，幂等；只增删本工具写入的 hook 条目，用户自己的 hook 与 permissions 等原样保留）。
 
 
 ## 2. 步骤
@@ -68,9 +68,14 @@ ai-kb 把用户和 AI 的所有讨论沉淀成**个人知识库**（用户自己
 ```bash
 bash "$PACK/universal/selftest.sh"
 ```
-必须输出 `✅ ai-kb 机制正常`（20 项全通过）。有 ✘：把失败项原样告诉用户，**停止安装**。
+必须输出 `✅ ai-kb 机制正常`（全部通过，当前共 52 项）。有 ✘：把失败项原样告诉用户，**停止安装**。
 
 ### 步骤 4：安装
+**先预览再写入（会修改用户的配置文件，必须先告诉用户并得到同意）**：
+```bash
+AI_KB_DIR="$KB" bash "$PACK/universal/install.sh" --dry-run     # 只预览将改哪些配置文件，不写任何东西
+```
+把预览结果告诉用户，同意后再正式安装：
 ```bash
 AI_KB_DIR="$KB" bash "$PACK/universal/install.sh" --target <你自己的用户级全局指令文件>
 ```

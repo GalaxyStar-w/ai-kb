@@ -151,3 +151,16 @@ AI_KB_DIR=$KB python3 ~/.ai-kb/kb.py sync         # 提交 + 推送
 
 先把未落盘内容写进知识库，再让压缩发生。
 （若已配 hook，`PreCompact` 会自动触发这一步。）
+
+---
+
+## 看板（可选）
+
+`build_dashboard.py` 把知识库做成网页看板。**默认加密**（口令端到端加密，服务器上只有密文）；`--plain-local` 仅限本机预览，**绝不部署**。
+口令由用户自己在终端用 `--gen-pass` / `--set-pass` 设置，**你不要看、不要记、不要写进任何地方**。
+部署：`bash deploy_dashboard.sh`（首次用 `--rotate`）；清理旧站（会删除 Cloudflare 上的项目）必须用户本轮明确同意，且加 `KB_CONFIRM=1`。
+详见仓库 README「加密看板」一节与 `AI-START-HERE.md` 7.5。
+
+## 更新工具
+
+已有知识库时：`bootstrap.sh --sync-tool` 把最新工具同步进 `<KB>/_tool/`（被覆盖的旧文件先备份）；`install.sh --dry-run` 预览 hook 配置的改动。

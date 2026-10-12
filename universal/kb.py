@@ -38,6 +38,7 @@ STATUSF = os.path.join(META, ".sync-status.json")
 BLOCKF = os.path.join(META, "SYNC_BLOCKED.md")
 HAS_GIT = shutil.which("git") is not None
 mode = sys.argv[1] if len(sys.argv) > 1 else ""
+VERSION = "2.2.0"
 HOOK_MODES = ("sessionstart", "precompact", "prompt", "stop")
 today = datetime.date.today().isoformat()
 NON_PROJECT_PREFIXES = ("/tmp/", "/private/tmp/", "/private/var/", "/var/folders/")
@@ -186,7 +187,7 @@ def is_temp_dir(path):
     return False
 
 
-def project(cwd):
+def project(cwd, persist=True):
     root = cwd
     if HAS_GIT:
         try:
@@ -216,6 +217,8 @@ def project(cwd):
         if name in m.values():
             name += "-" + hashlib.md5(root.encode()).hexdigest()[:4]
         m[root] = name
+        if not persist:            # 只读场景（如 doctor）不落盘，避免写入幽灵映射
+            return name, root
         write(MAPF, json.dumps(m, indent=2, ensure_ascii=False))
     return m[root], root
 
@@ -551,6 +554,7 @@ def cmd_doctor():
     """体检：一次跑完所有关键检查，输出人话结论。给新机器安装后、或怀疑出问题��用。"""
     out = []
     ok = lambda c, m: out.append(("✅" if c else "❌", m))
+    out.append(("ℹ️", f"ai-kb v{VERSION}"))
 
     # 1. 依赖
     ok(shutil.which("python3") is not None, "python3 可用")
@@ -615,11 +619,26 @@ def cmd_doctor():
         ok(not stale, f"路径映射 {len(m)} 条全部有效" if not stale
            else f"路径映射 {len(m)} 条，其中 {len(stale)} 条指向已不存在的目录（旧机器残留，可清理）")
 
+    # 8. 看板安全（看板把整个知识库发布成网页，必须加密后再部署）
+    aikb = os.path.expanduser("~/.ai-kb")
+    if os.path.isdir(os.path.join(KB, "_dashboard")):
+        ok(False, "发现旧版明文看板产物 _dashboard/：若曾部署到公开托管，请迁移到加密版（build_dashboard.py）并轮换网址（deploy_dashboard.sh --rotate）")
+    dout = os.path.join(aikb, "dashboard_out")
+    if os.path.isdir(dout):
+        enc = os.path.isfile(os.path.join(dout, "vault", "params.json"))
+        leak = [n for n in ("search-index.json", "nav.json", "content") if os.path.exists(os.path.join(dout, n))]
+        ok(enc and not leak, "看板待部署产物是加密的" if enc and not leak else "看板待部署产物含明文或不完整，不要部署")
+    if os.path.isfile(os.path.join(aikb, "dashboard_pass")):
+        mode = os.stat(os.path.join(aikb, "dashboard_pass")).st_mode & 0o077
+        ok(mode == 0, "看板口令文件权限 600" if mode == 0 else "看板口令文件权限过宽，请 chmod 600 ~/.ai-kb/dashboard_pass")
+    if os.path.isfile(os.path.join(aikb, "kb_project.old")):
+        out.append(("⚠️", "有待清理的旧看板项目（~/.ai-kb/kb_project.old）：确认新站可用后执行 KB_CONFIRM=1 bash deploy_dashboard.sh --purge-old"))
+
     # 7. 项目识别自测
-    cases = [("/tmp", "_general"), (os.path.expanduser("~/ai-knowledge-base"), "_general")]
+    cases = [("/tmp", "_general"), (KB, "_general")]      # 用实际知识库路径（旧版硬编码 ~/ai-knowledge-base，知识库在别处会误报并写入幽灵映射）
     bad = []
     for cwd, want in cases:
-        got = project(cwd)[0]
+        got = project(cwd, persist=False)[0]
         if got != want:
             bad.append(f"{cwd}→{got}(应为 {want})")
     ok(not bad, "项目识别：临时目录/知识库根 均正确归 _general" if not bad else f"识别异常：{'; '.join(bad)}")
