@@ -17,6 +17,7 @@
 - **`SessionStart` 的 matcher 只设 `startup`**：会话恢复/清屏/上下文压缩之后规则不再重新注入。改为全部来源触发（与插件 `hooks.json` 一致）。
 
 ### 修复（中）
+- `kb.py build` 自动补全缺失的项目结构（只新增、不覆盖）：git 不跟踪空目录，克隆到新机器后 `discussions/` `decisions/` 等会丢失，`doctor` 会误报缺失。
 - `kb.py doctor` 不再写入幽灵映射：识别自测改用实际知识库路径并且不落盘（旧版硬编码 `~/ai-knowledge-base`，知识库在别处时误报并写入 `map.json`）。
 - `bootstrap.sh`：`_tool/` 现在放入**完整工具**（含 `AGENT-SETUP.md`、`claude-code/`、看板脚本与模板），换机器恢复与看板构建在新装环境可用；新增 `--sync-tool`（覆盖前备份）。
 - `bootstrap.sh --remote` 克隆遵循「地址里的账号」规则（多 GitHub 账号下不再依赖活动账号）。
@@ -27,7 +28,7 @@
 
 ### 其他
 - `.gitignore` 增加杂散临时文件模式与看板口令/令牌/盐/产物。
-- `selftest.sh` 从 20 项扩展到 **52 项**，新增：安装器改配置的安全性、bootstrap 与 `_tool/` 完整性、`doctor`/`audit`/`export`/`clean-stale`、看板加密（含错误口令、明文泄露检查、确定性、拒绝改动非本工具目录、无口令拒绝构建）、会话脱敏；macOS 自带 bash 3.2 通过。
+- `selftest.sh` 从 20 项扩展到 **55 项**，新增：安装器改配置的安全性、bootstrap 与 `_tool/` 完整性、`doctor`/`audit`/`export`/`clean-stale`、看板加密（含错误口令、明文泄露检查、确定性、拒绝改动非本工具目录、无口令拒绝构建）、会话脱敏；macOS 自带 bash 3.2 通过。
 - `AGENT-SETUP.md`：安装前先 `--dry-run` 预览并征得用户同意；`AI-START-HERE.md` / `skill/SKILL.md` 增加看板规则。
 
 ## v2.1.0 · 2026-10-11

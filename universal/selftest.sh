@@ -95,6 +95,13 @@ if [ -f "${REPO}/bootstrap.sh" ]; then
   bash -n "${REPO}/bootstrap.sh" && bash -n "${HERE}/install.sh"; ok $? "bootstrap.sh / install.sh 语法正确"
 else echo "  - 跳过（找不到 bootstrap.sh：不在完整工具目录中运行）"; fi
 
+echo "[6.5] 克隆后丢失的空目录会被补全"
+rmdir "${KP}/decisions" 2>/dev/null || rm -rf "${KP}/decisions"; rm -f "${KP}/discussions/.gitkeep" 2>/dev/null
+[ ! -d "${KP}/decisions" ]; ok $? "（准备）模拟 git 克隆后空目录丢失"
+python3 "${KBPY}" build >/dev/null 2>&1
+[ -d "${KP}/decisions" ] && [ -d "${KP}/discussions" ]; ok $? "build 补全了缺失的 decisions/ discussions/（只新增，不覆盖已有文件）"
+grep -q "selftest-marker-todo" "${KP}/todo.md"; ok $? "补全时没有覆盖已有内容（todo.md 原有条目仍在）"
+
 echo "[7] doctor / audit / export / clean-stale"
 [ -f "${AI_KB_DIR}/_meta/map.json" ] && cp "${AI_KB_DIR}/_meta/map.json" "${T}/map.before" || echo '{}' > "${T}/map.before"
 python3 "${KBPY}" doctor 2>&1 | grep -q "ai-kb v"; ok $? "doctor 可运行并显示版本"

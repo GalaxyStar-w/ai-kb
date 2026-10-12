@@ -284,6 +284,9 @@ def build():
     ensure_kb()
     rows, open_todos, open_qs, recent = [], [], [], []
     for n in all_projects():
+        # 补全缺失的结构（只新增、绝不覆盖）：git 不跟踪空目录，克隆到新机器后 discussions/ decisions/ 等会丢失；
+        # 外部创建的项目也可能缺文件。ensure_project 是幂等的，已有文件一律不动。
+        ensure_project(n, "")
         s = stats(n)
         p = os.path.join(PROJ, n, "README.md")
         text = read(p) if os.path.exists(p) else tpl_readme(n, "")
