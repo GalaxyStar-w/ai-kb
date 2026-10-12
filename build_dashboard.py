@@ -16,6 +16,7 @@
 用法：
     python3 build_dashboard.py --gen-pass      # 首次：生成强口令，存 ~/.ai-kb/dashboard_pass（权限 600），并只显示这一次
     python3 build_dashboard.py --set-pass      # 或：自己输入口令（至少 12 位，输入时不回显）
+    python3 build_dashboard.py --show-pass     # 在这台机器上再次查看口令（仅真实终端；AI/脚本调用会被拒绝）
     python3 build_dashboard.py                 # 构建加密站 → ~/.ai-kb/dashboard_out/（可直接部署）
     python3 build_dashboard.py --plain-local   # 仅本机预览：明文站 → ~/.ai-kb/dashboard_local/（禁止部署）
 口令来源：环境变量 KB_DASH_PASS，或文件 ~/.ai-kb/dashboard_pass。口令绝不进知识库、绝不进命令行参数。
@@ -407,6 +408,15 @@ def refuse_overwrite():
     return False
 
 
+def _is_tty():
+    """口令只允许显示在真实终端里。stdout 被重定向/管道/由 AI 的 shell 工具捕获时都不是 tty，
+    那样打印会让口令进入会话记录或日志。"""
+    try:
+        return sys.stdout.isatty()
+    except Exception:
+        return False
+
+
 def cmd_gen_pass():
     if refuse_overwrite():
         return 1
@@ -415,10 +425,31 @@ def cmd_gen_pass():
     p = "-".join(groups)                                   # 25 个字符，约 120 位熵
     write_pass(p)
     print("✔ 已生成强口令并保存到 %s（权限 600，不在知识库里）" % PASS_FILE)
+    if _is_tty():
+        print("")
+        print("    %s" % p)
+        print("")
+        print("⚠ 请现在就把它存进你的密码管理器（也可以之后随时用 --show-pass 在这台机器上再次查看）。")
+    else:
+        print("ℹ 当前不是交互终端（例如由 AI 或脚本调用），为避免口令进入会话记录/日志，**没有显示口令**。")
+        print("  请你自己在终端运行：python3 build_dashboard.py --show-pass")
+    return 0
+
+
+def cmd_show_pass():
+    """在这台机器上再次查看口令（只在真实终端里显示）。"""
+    p = read_pass()
+    if not p:
+        print("✘ 这台机器上没有口令（没有 %s，也没设 KB_DASH_PASS）。若口令在别的机器上生成，请到那台机器查看；"
+              "全都丢了就只能换新口令：先备份并移走旧文件，再 --gen-pass，重新构建并部署。" % PASS_FILE)
+        return 1
+    if not _is_tty():
+        print("✘ 拒绝在非交互终端里显示口令（避免进入会话记录/日志）。请在你自己的终端里运行本命令。")
+        return 1
     print("")
     print("    %s" % p)
     print("")
-    print("⚠ 这是它唯一一次显示。请现在就存进你的密码管理器（丢了就无法打开看板，只能重新构建并更换口令）。")
+    print("（口令文件：%s。建议同时存进密码管理器；在登录页输入后，浏览器/密码管理器也可以帮你记住。）" % PASS_FILE)
     return 0
 
 
@@ -511,12 +542,15 @@ if __name__ == "__main__":
     ap.add_argument("--out", default=None, help="输出目录（默认 ~/.ai-kb/dashboard_out；--plain-local 时为 ~/.ai-kb/dashboard_local）")
     ap.add_argument("--gen-pass", action="store_true", help="生成强口令并保存（仅首次）")
     ap.add_argument("--set-pass", action="store_true", help="交互设置口令（不回显）")
+    ap.add_argument("--show-pass", action="store_true", help="在这台机器上再次查看口令（仅真实终端）")
     ap.add_argument("--plain-local", action="store_true", help="仅本机预览：输出明文站（禁止部署）")
     a = ap.parse_args()
     if a.gen_pass:
         sys.exit(cmd_gen_pass())
     if a.set_pass:
         sys.exit(cmd_set_pass())
+    if a.show_pass:
+        sys.exit(cmd_show_pass())
     if a.plain_local:
         out = prepare_out(a.out or os.path.join(AIKB_HOME, "dashboard_local"))
         build(out)

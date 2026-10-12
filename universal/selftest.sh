@@ -142,6 +142,13 @@ if command -v node >/dev/null 2>&1 && [ -f "${REPO}/build_dashboard.py" ] && [ -
   [ "${rc}" -ne 0 ] && [ -f "${T}/notmine/keep.txt" ]; ok $? "拒绝改动非本工具的目录（不会误删别的文件）"
   HOME="${H5}" AI_KB_DIR="${DK}" python3 "${REPO}/build_dashboard.py" --out "${T}/nopass" >/dev/null 2>&1; [ $? -ne 0 ]
   ok $? "没有口令时拒绝构建（不会悄悄产出明文站）"
+  GP="$(HOME="${T}/h6" AI_KB_DIR="${DK}" python3 "${REPO}/build_dashboard.py" --gen-pass 2>&1)"
+  [ -f "${T}/h6/.ai-kb/dashboard_pass" ]; ok $? "--gen-pass 把口令写入 ~/.ai-kb/dashboard_pass"
+  GV="$(cat "${T}/h6/.ai-kb/dashboard_pass" 2>/dev/null)"
+  [ -n "${GV}" ] && ! printf '%s' "${GP}" | grep -qF "${GV}"; ok $? "非交互环境（如 AI 的 shell）下 --gen-pass 不会打印口令"
+  SP="$(HOME="${T}/h6" python3 "${REPO}/build_dashboard.py" --show-pass 2>&1)"; rc=$?
+  [ "${rc}" -ne 0 ] && ! printf '%s' "${SP}" | grep -qF "${GV}"; ok $? "非交互环境下 --show-pass 拒绝显示口令"
+  [ "$(stat -f '%Lp' "${T}/h6/.ai-kb/dashboard_pass" 2>/dev/null || stat -c '%a' "${T}/h6/.ai-kb/dashboard_pass")" = "600" ]; ok $? "口令文件权限为 600"
   bash -n "${REPO}/deploy_dashboard.sh"; ok $? "deploy_dashboard.sh 语法正确"
 else echo "  - 跳过（需要 node 与 build_dashboard.py / vault_encrypt.mjs）"; fi
 

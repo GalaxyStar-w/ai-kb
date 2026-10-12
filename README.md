@@ -10,7 +10,7 @@
 换台电脑       → 什么都没有      换台电脑       → git clone 就有了
 ```
 
-版本 **v2.2.0**（更新记录见 [CHANGELOG.md](CHANGELOG.md)）。仅需 `python3` + `git`；加密看板另需 `node`。
+版本 **v2.2.1**（更新记录见 [CHANGELOG.md](CHANGELOG.md)）。仅需 `python3` + `git`；加密看板另需 `node`。
 
 ---
 
@@ -114,6 +114,7 @@ git clone https://github.com/GalaxyStar-w/ai-kb.git && cd ai-kb
 ```bash
 # 1) 首次：生成强口令（只显示这一次，请立刻存进密码管理器）
 python3 _tool/build_dashboard.py --gen-pass          # 或 --set-pass：自己输入（不回显，至少 12 位）
+python3 _tool/build_dashboard.py --show-pass         # 之后在这台机器上随时再看一次口令（仅真实终端）
 # 2) 本机预览（明文站，仅限本机 file:// 打开，禁止部署）
 python3 _tool/build_dashboard.py --plain-local
 # 3) 部署：把 Cloudflare API Token 放到 ~/.ai-kb/cf_token（chmod 600）
@@ -136,7 +137,8 @@ KB_CONFIRM=1 bash _tool/deploy_dashboard.sh --purge-old          # 删除旧项�
 **请知道的局限**：
 - 密文是公开的，别人可以**离线暴力猜口令**：口令强度决定安全性。请用 `--gen-pass`（约 120 位熵）或 ≥16 位混合字符。
 - 能看到的元数据：文件个数与大小、构建时间。看不到：项目名、文件名、任何内容。
-- 口令丢失 = 无法解锁，只能重新构建并更换口令（旧口令加密的内容无法恢复，但知识库本身还在）。
+- **口令存哪、怎么找回**：口令存在构建机的 `~/.ai-kb/dashboard_pass`（600，不进知识库）；在那台机器上随时 `--show-pass` 查看。口令只会显示在**真实终端**里——由 AI 或脚本调用时（stdout 不是终端）不会打印，避免进入会话记录/日志。登录页是标准密码框，浏览器/密码管理器（1Password、iCloud 钥匙串等）可以保存并在手机上自动填充，不必手敲。
+- 只有「构建机上的文件」和「你自己的备份」都丢了才无法解锁：那时只能换新口令重新构建部署（知识库本身不受影响）。为什么不能由服务端/AI 替你保管：端到端加密的意义就是除了你没人能解开，口令一旦放在别人能碰到的地方，加密就白做了。
 - 浏览器需要 HTTPS（WebCrypto 限制；`localhost` 也可）。「在这台设备上记住」会把**派生后的密钥**存在该浏览器的本地存储里，公共电脑请不要勾选；页面右下角有「🔒 锁定」。
 - 构建需要 Node.js ≥ 16；部署需要 `wrangler`（脚本会自动找，找不到用 `npx`）。
 
@@ -244,7 +246,7 @@ python3 extract_sessions.py --all ~/kb-extract [--source claude|workbuddy]
 
 正常工作即可。想主动操作时直接说：「看下总页 / 还有什么没做」「之前为什么决定 X」「搜一下知识库里关于 Y」「整理一下这个项目的档案」「审计一下最近有没有漏记」「同步到 GitHub」。
 
-**自测**：`bash universal/selftest.sh`（58 项，在临时知识库里跑，不碰真实数据；macOS 自带 bash 3.2 可直接运行）。涵盖：初始化与项目识别、总页与搜索、密钥拦截、推送保险、安装器改配置的安全性、bootstrap 与 `_tool/` 完整性、`doctor`/`audit`/`export`/`clean-stale`、看板加密（含错误口令、密文无明文泄露、确定性）、会话脱敏。
+**自测**：`bash universal/selftest.sh`（62 项，在临时知识库里跑，不碰真实数据；macOS 自带 bash 3.2 可直接运行）。涵盖：初始化与项目识别、总页与搜索、密钥拦截、推送保险、安装器改配置的安全性、bootstrap 与 `_tool/` 完整性、`doctor`/`audit`/`export`/`clean-stale`、看板加密（含错误口令、密文无明文泄露、确定性）、会话脱敏。
 
 ---
 
