@@ -39,7 +39,7 @@ STATUSF = os.path.join(META, ".sync-status.json")
 BLOCKF = os.path.join(META, "SYNC_BLOCKED.md")
 HAS_GIT = shutil.which("git") is not None
 mode = sys.argv[1] if len(sys.argv) > 1 else ""
-VERSION = "2.3.0"
+VERSION = "2.3.1"
 ROOT_CAP_TODO = 15      # 总页每个项目最多列出的未完成待办条数
 ROOT_CAP_Q = 10         # 总页每个项目最多列出的未决问题条数
 CTX_CAP = 9000          # 会话开场注入：待办/问题清单各自的字符上限
@@ -836,10 +836,10 @@ def cmd_coverage(write=True):
         wrote = any(lo <= t <= hi for t, _ in commits)
         id_hit = bool(s["sid"]) and s["sid"][:8] in corpus
         pct = (sum(1 for t in s["terms"] if t in corpus) / len(s["terms"])) if len(s["terms"]) >= 5 else None
-        if s["user_turns"] < 3:
-            st, basis = "轻量·未判断", "发言<3"
-        elif id_hit:
+        if id_hit:      # 知识库里有会话号 = 已整理（不论会话长短；轻量会话补录后也应显示为已整理）
             st, basis = "已整理", "知识库含会话号"
+        elif s["user_turns"] < 3:
+            st, basis = "轻量·未判断", "发言<3"
         elif pct is not None:
             st = "已覆盖" if pct >= 0.8 else ("部分覆盖" if pct >= 0.5 else "未整理")
             basis = f"标识符命中 {pct*100:.0f}%" + ("；会话期间有写入" if wrote else "")
