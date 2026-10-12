@@ -102,6 +102,14 @@ python3 "${KBPY}" build >/dev/null 2>&1
 [ -d "${KP}/decisions" ] && [ -d "${KP}/discussions" ]; ok $? "build 补全了缺失的 decisions/ discussions/（只新增，不覆盖已有文件）"
 grep -q "selftest-marker-todo" "${KP}/todo.md"; ok $? "补全时没有覆盖已有内容（todo.md 原有条目仍在）"
 
+echo "[6.6] 维护命令不会把所在目录登记成项目"
+O="${T}/otherproj"; mkdir -p "${O}"; git -C "${O}" init -q
+( cd "${O}" && python3 "${KBPY}" build >/dev/null 2>&1; python3 "${KBPY}" status >/dev/null 2>&1; python3 "${KBPY}" init >/dev/null 2>&1 )
+[ ! -d "${AI_KB_DIR}/projects/otherproj" ]; ok $? "build/status/init 不会在知识库里创建该目录对应的项目（旧版会）"
+! grep -q "otherproj" "${AI_KB_DIR}/_meta/map.json" 2>/dev/null; ok $? "map.json 里没有被误登记的目录"
+( cd "${O}" && echo "{\"cwd\":\"${O}\"}" | python3 "${KBPY}" prompt >/dev/null 2>&1 )
+[ -d "${AI_KB_DIR}/projects/otherproj" ]; ok $? "而 hook 模式（agent 真在该目录工作）仍会正常登记"
+
 echo "[7] doctor / audit / export / clean-stale"
 [ -f "${AI_KB_DIR}/_meta/map.json" ] && cp "${AI_KB_DIR}/_meta/map.json" "${T}/map.before" || echo '{}' > "${T}/map.before"
 python3 "${KBPY}" doctor 2>&1 | grep -q "ai-kb v"; ok $? "doctor 可运行并显示版本"

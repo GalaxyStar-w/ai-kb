@@ -770,8 +770,14 @@ def main():
         data = {}
     cwd = data.get("cwd") or os.getcwd()
     ensure_kb()
-    name, root = project(cwd)
-    ensure_project(name, root)
+    # 只有「agent 在某个项目里工作」的模式才把当前目录登记成项目。
+    # build / status / sync / init 是维护命令，在哪个目录运行都不该顺手创建项目
+    # （旧版会：在工具仓库里跑一次 build 就在知识库里多出一个空项目并写入 map.json）。
+    if mode in ("sessionstart", "context", "prompt", "precompact", "stop"):
+        name, root = project(cwd)
+        ensure_project(name, root)
+    else:
+        name, root = "_general", ""
 
     if mode == "init":
         build()
