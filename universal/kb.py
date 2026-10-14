@@ -98,17 +98,38 @@ def gh_token(user):
         return None
 
 
+def net_env():
+    """联网 git 命令用的环境：剥掉代理环境变量。
+
+    为什么必须剥：WorkBuddy/部分终端会注入 HTTP_PROXY=http://127.0.0.1:xxxxx，
+    而 git 读代理的优先级是「环境变量 > git config」，仓库级
+    `git config http.proxy ""` 压不住环境变量 —— 实测 push 报
+    「Failed to connect to github.com port 443」（2026-10-14，T-43）。
+    临时解法是每次手工 `env -u HTTP_PROXY ... git push`，这里写进工具根治。
+    只影响 kb.py 自己 spawn 的 git 子进程，不动用户 shell 环境。
+    """
+    env = dict(os.environ)
+    for k in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
+              "ALL_PROXY", "all_proxy", "FTP_PROXY", "ftp_proxy"):
+        env.pop(k, None)
+    return env
+
+
 def authed_git(*a, timeout=60):
     """需要联网认证的 git 命令（fetch/pull/push）。地址里带用户名且 gh 已登录该账号时，用该账号的 token 作为临时凭据；
     token 只经环境变量传给子进程，不写入命令行、配置或磁盘。"""
     user = gh_account()
     tok = gh_token(user) if user else None
     if tok:
-        env = dict(os.environ, KB_GH_USER=user, KB_GH_TOKEN=tok)
+        env = net_env()
+        env["KB_GH_USER"] = user
+        env["KB_GH_TOKEN"] = tok
         helper = '!f() { echo "username=$KB_GH_USER"; echo "password=$KB_GH_TOKEN"; }; f'
         return subprocess.run(["git", "-C", KB, "-c", "credential.helper=", "-c", "credential.helper=" + helper, *a],
                               capture_output=True, text=True, timeout=timeout, env=env)
-    return git(*a, timeout=timeout)
+    # 无 token 走普通 git（SSH 等），同样剥代理
+    return subprocess.run(["git", "-C", KB, "-c", "core.quotepath=false", *a],
+                          capture_output=True, text=True, timeout=timeout, env=net_env())
 
 
 def has_remote():
