@@ -247,7 +247,7 @@ python3 extract_sessions.py --all ~/kb-extract [--source claude|workbuddy]
 
 正常工作即可。想主动操作时直接说：「看下总页 / 还有什么没做」「之前为什么决定 X」「搜一下知识库里关于 Y」「整理一下这个项目的档案」「审计一下最近有没有漏记」「同步到 GitHub」。
 
-**自测**：`bash universal/selftest.sh`（92 项，在临时知识库里跑，不碰真实数据；macOS 自带 bash 3.2 可直接运行）。涵盖：初始化与项目识别、总页与搜索、密钥拦截、推送保险、安装器改配置的安全性、bootstrap 与 `_tool/` 完整性、`doctor`/`audit`/`export`/`clean-stale`、看板加密（含错误口令、密文无明文泄露、确定性）、会话脱敏、record 批量写入与多机编号。
+**自测**：`bash universal/selftest.sh`（93 项，在临时知识库里跑，不碰真实数据；macOS 自带 bash 3.2 可直接运行）。涵盖：初始化与项目识别、总页与搜索、密钥拦截、推送保险、安装器改配置的安全性、bootstrap 与 `_tool/` 完整性、`doctor`/`audit`/`export`/`clean-stale`、看板加密（含错误口令、密文无明文泄露、确定性）、会话脱敏、record 批量写入与多机编号。
 
 ---
 
