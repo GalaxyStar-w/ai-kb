@@ -8,6 +8,7 @@ command -v python3 >/dev/null || { echo "✘ 缺少 python3"; exit 2; }
 command -v git >/dev/null || { echo "✘ 缺少 git"; exit 2; }
 T="$(mktemp -d "$HOME/.ai-kb-selftest.XXXXXX")"; trap 'rm -rf "$T"' EXIT
 export AI_KB_DIR="$T/kb"; unset CLAUDE_TRACKER_DIR
+export AI_KB_MACHINE=selft   # 固定编号前缀，避免自测往真实的 ~/.ai-kb/machine 写东西
 P="$T/proj"; mkdir -p "$P"; git -C "$P" init -q
 pass=0; fail=0
 ok(){ if [ "$1" = 0 ]; then echo "  ✔ $2"; pass=$((pass+1)); else echo "  ✘ $2"; fail=$((fail+1)); fi; }
@@ -211,6 +212,39 @@ grep -q "| cccccccc |.*已整理" "${T}/kb-cov/_meta/session-ledger.md"; ok $? "
 grep -q "| dddddddd |.*已整理" "${T}/kb-cov/_meta/session-ledger.md"; ok $? "知识库里含会话号的会话标为「已整理」"
 [ -s "${T}/kb-cov/_meta/session-ledger.md" ]; ok $? "生成了会话台账 _meta/session-ledger.md"
 HOME="${H7}" AI_KB_DIR="${T}/kb-cov" python3 "${KBPY}" coverage --no-write >/dev/null 2>&1; ok $? "coverage --no-write 可运行（不写台账）"
+
+echo "[9.8] record 批量写入与多机编号（v2.4.0）"
+PD="${AI_KB_DIR}/projects/${PN}"
+printf '@@todo [优化|中] 甲机待办 — 自测\n@@q [待讨论] 甲机问题 — 自测\n@@discussion 自测纪要\n正文一行\n@@decision 自测决议 | 一句话结论\n决议正文\n' | AI_KB_MACHINE=jia python3 "$KBPY" record "${PN}" >/dev/null 2>&1; ok $? "record 一次写入待办/问题/纪要/决议"
+TJ="$(grep -o 'T-jia-[0-9]*' "${PD}/todo.md" | head -1)"; [ -n "${TJ}" ]; ok $? "新待办编号带本机前缀（${TJ}）"
+grep -q "^- Q-jia-[0-9]* " "${PD}/questions.md"; ok $? "新问题编号带本机前缀"
+ls "${PD}/decisions" | grep -q "^D-jia-[0-9]*-"; ok $? "新决议文件编号带本机前缀"
+grep -q "D-jia-[0-9]* 自测决议" "${PD}/README.md"; ok $? "README「关键决议」加了一行"
+ls "${PD}/discussions" | grep -q "自测纪要"; ok $? "纪要文件已创建"
+N1="${TJ##*-}"; TY="$(AI_KB_MACHINE=yi python3 "$KBPY" next-id "${PN}" T)"
+[ "${TY}" = "T-yi-$((N1+1))" ]; ok $? "另一台机器取号：前缀不同、序号接着全库最大号（${TY}）"
+printf '@@todo [优化|中] 乙机待办 — 自测\n' | AI_KB_MACHINE=yi python3 "$KBPY" record "${PN}" >/dev/null 2>&1
+[ "$(grep -c "T-jia-${N1} \|T-yi-$((N1+1)) " "${PD}/todo.md")" = 2 ]; ok $? "两台机器的编号互不重复"
+printf '@@done %s 已完成\n@@todo [优化|中] 不该写入 — 自测\n@@done T-nope-99999 不存在\n' "${TJ}" | AI_KB_MACHINE=jia python3 "$KBPY" record "${PN}" >/dev/null 2>&1
+[ $? != 0 ] && ! grep -q "不该写入" "${PD}/todo.md" && grep -q "^- \[ \] ${TJ} " "${PD}/todo.md"; ok $? "有一条错误时整批都不写（原子校验）"
+printf '@@done %s 已完成\n' "${TJ}" | AI_KB_MACHINE=jia python3 "$KBPY" record "${PN}" >/dev/null 2>&1
+sed -n '/## 已完成/,$p' "${PD}/todo.md" | grep -q "^- \[x\] ${TJ} "; ok $? "@@done 能勾掉带前缀的待办并移到已完成"
+printf '@@log 自测 | - | token=%s\n' "ghp"_"abcdefghijklmnopqrstuvwxyz0123456789" | python3 "$KBPY" record "${PN}" >/dev/null 2>&1; [ $? != 0 ]; ok $? "record 拒绝写入疑似密钥"
+H9="${T}/h9"; mkdir -p "${H9}"; MT="$(HOME="${H9}" env -u AI_KB_MACHINE python3 "$KBPY" machine 2>&1)"
+[ -s "${H9}/.ai-kb/machine" ] && echo "${MT}" | grep -q "本机编号前缀"; ok $? "未设置前缀时按主机名自动生成并存到本机（$(cat "${H9}/.ai-kb/machine" 2>/dev/null)）"
+HOME="${H9}" env -u AI_KB_MACHINE python3 "$KBPY" machine abc >/dev/null 2>&1 && [ "$(cat "${H9}/.ai-kb/machine")" = abc ]; ok $? "machine <前缀> 可手动设置"
+HOME="${H9}" env -u AI_KB_MACHINE python3 "$KBPY" machine "A B" >/dev/null 2>&1; [ $? != 0 ]; ok $? "非法前缀被拒绝"
+L="${T}/lite"; mkdir -p "${L}"; cp "$KBPY" "${HERE}/rules.md" "${L}/"
+echo "{\"cwd\":\"$P\"}" | python3 "${L}/kb.py" sessionstart | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "规则" in json.dumps(d, ensure_ascii=False)' 2>/dev/null; ok $? "缺 rules-lite.md 时开场注入退回完整规则（不报错）"
+[ -f "${HERE}/rules-lite.md" ]; ok $? "工具目录包含 rules-lite.md"
+grep -q "rules-lite.md" "${HERE}/install.sh"; ok $? "install.sh 会安装 rules-lite.md"
+python3 -c "
+import importlib.util,os,sys
+os.environ['HTTP_PROXY']='http://127.0.0.1:1'; os.environ['https_proxy']='http://127.0.0.1:1'
+sys.argv=['kb.py','x']
+s=importlib.util.spec_from_file_location('kb','$KBPY'); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
+e=m.net_env(); assert 'HTTP_PROXY' not in e and 'https_proxy' not in e
+" 2>/dev/null; ok $? "联网 git 剥掉代理环境变量（net_env，T-43）"
 
 echo "[10] 一致性"
 python3 "$KBPY" status >/dev/null 2>&1; ok $? "status 可运行"

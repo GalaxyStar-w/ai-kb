@@ -289,7 +289,7 @@ def build(outdir):
         todo_txt, ques_txt, log_txt = rd("todo.md"), rd("questions.md"), rd("log.md")
         t_open = len(re.findall(r"^- \[ \]", open_part(todo_txt, "## 已完成"), re.M))
         t_done = len(re.findall(r"^- \[[xX]\]", todo_txt, re.M))
-        q_open = len(re.findall(r"^- Q-\d+", open_part(ques_txt, "## 已决议"), re.M))
+        q_open = len(re.findall(r"^- Q-(?:[a-z][a-z0-9]{0,7}-)?\d+", open_part(ques_txt, "## 已决议"), re.M))
         dates = re.findall(r"^- (\d{4}-\d{2}-\d{2})", log_txt, re.M)
 
         nav.append({

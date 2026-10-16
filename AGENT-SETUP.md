@@ -81,7 +81,7 @@ AI_KB_DIR="$KB" bash "$PACK/universal/install.sh" --target <你自己的用户�
 ```
 - `<你自己的用户级全局指令文件>`：你应当知道自己启动时会读取哪个**用户级/全局**指令文件（例如：Codex `~/.codex/AGENTS.md`；Gemini CLI `~/.gemini/GEMINI.md`；Claude Code `~/.claude/CLAUDE.md`；Cursor 的 User Rules；Windsurf 的全局规则）。这些位置仅为参考，以你自己所在工具的实际机制为准。
 - 如果你的工具只能在 UI 里配置全局规则（无法写文件）：运行不带 `--target` 的 install.sh，它会**打印**指令片段，你把片段原样交给用户并说明要粘贴到哪里。
-- 没有 bash（如纯 Windows）：把 `universal/kb.py`、`universal/rules.md` 复制到 `%USERPROFILE%\.ai-kb\`，把 `universal/AGENT-INSTRUCTIONS.md` 里的 `__KB__` 全部替换成 `KB` 的真实路径后写入全局指令。
+- 没有 bash（如纯 Windows）：把 `universal/kb.py`、`universal/rules.md`、`universal/rules-lite.md` 复制到 `%USERPROFILE%\.ai-kb\`，把 `universal/AGENT-INSTRUCTIONS.md` 里的 `__KB__` 全部替换成 `KB` 的真实路径后写入全局指令。
 - 如果你的工具支持"会话开始 / 每轮 / 回合结束 / 压缩前"这类事件钩子：可参照 `claude-code/ai-kb/hooks/hooks.json`，把 `kb.py sessionstart|prompt|precompact|stop` 接上（stdin 为 JSON，含 `cwd`、`transcript_path`；输出格式因工具而异，需要你自己适配）。**接钩子是可选增强**，不做也能用，只是少了自动提醒和自动推送。
 
 ### 步骤 5：权限

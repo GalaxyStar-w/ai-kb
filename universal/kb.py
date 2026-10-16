@@ -5,6 +5,8 @@ hook 模式（stdin 传 JSON）: sessionstart | precompact | prompt | stop
 通用/手动模式:
   context            输出规则 + 总览 + 当前项目要点（给没有 hook 的 agent 在会话开始时运行）
   build              重新生成各项目 README 的自动区块和根目录总页
+  machine [标识]     查看/设置本机编号前缀（新编号形如 T-<标识>-70，防多机撞号）
+  record <项目>      从 stdin 一次写入多条记录（纪要/决议/待办/问题/完成/产物/日志），全部校验通过才写
   search <词> [...]   在整个知识库里搜索（多个词为"或"，支持正则），返回 文件:行号: 内容
   status             打印各项目统计与同步状态
   init               创建知识库目录骨架（git init、.gitignore）
@@ -39,7 +41,7 @@ STATUSF = os.path.join(META, ".sync-status.json")
 BLOCKF = os.path.join(META, "SYNC_BLOCKED.md")
 HAS_GIT = shutil.which("git") is not None
 mode = sys.argv[1] if len(sys.argv) > 1 else ""
-VERSION = "2.3.1"
+VERSION = "2.4.0"
 ROOT_CAP_TODO = 15      # 总页每个项目最多列出的未完成待办条数
 ROOT_CAP_Q = 10         # 总页每个项目最多列出的未决问题条数
 CTX_CAP = 9000          # 会话开场注入：待办/问题清单各自的字符上限
@@ -272,7 +274,7 @@ def stats(name):
     todo, ques, log = rd("todo.md"), rd("questions.md"), rd("log.md")
     t_open = len(re.findall(r"^- \[ \]", open_part(todo, "## 已完成"), re.M))
     t_done = len(re.findall(r"^- \[[xX]\]", todo, re.M))
-    q_open = len(re.findall(r"^- Q-\d+", open_part(ques, "## 已决议"), re.M))
+    q_open = len(re.findall(r"^- Q-" + ID_TAG + r"\d+", open_part(ques, "## 已决议"), re.M))
     def files(sub, skip=("INDEX.md", ".gitkeep")):
         p = os.path.join(d, sub)
         return sorted([f for f in os.listdir(p) if f not in skip and not f.startswith(".")]) if os.path.isdir(p) else []
@@ -487,10 +489,29 @@ def pull():
         up = git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
         if up.returncode != 0:
             return
-        r = authed_git("pull", "--rebase", "--autostash", "-q", timeout=45)
+        # 多台机器共用一个知识库：用 merge 而不是 rebase（rebase 会把几十个本地提交逐个重放，每个都可能撞 README 冲突）。
+        # 只追加的清单靠 .gitattributes 的 merge=union 保留双方；README 的冲突几乎都在脚本生成的 AUTO 区块，自动处理后重新生成。
+        r = git("merge", "--no-edit", "-q", "@{u}", timeout=45)
         if r.returncode != 0:
-            git("rebase", "--abort")
-            set_status(False, "拉取合并冲突，已放弃本次合并；请手动处理")
+            bad = [p for p in git("diff", "--name-only", "--diff-filter=U").stdout.split("\n") if p]
+            if bad and all(os.path.basename(p) == "README.md" for p in bad):
+                for p in bad:  # 只在冲突块里取本机版本，其余双方改动都保留；AUTO 区块随后 build() 重算
+                    fp = os.path.join(KB, p)
+                    stages = []
+                    for n in (2, 1, 3):
+                        tmp = fp + f".merge{n}"
+                        write(tmp, git("show", f":{n}:{p}").stdout)
+                        stages.append(tmp)
+                    out = subprocess.run(["git", "merge-file", "--ours", "-p", *stages], cwd=KB, capture_output=True, text=True).stdout
+                    write(fp, out)
+                    for tmp in stages:
+                        os.remove(tmp)
+                build()
+                git("add", "-A")
+                git("commit", "-q", "--no-edit")
+            else:
+                git("merge", "--abort")
+                set_status(False, "拉取合并冲突（" + "、".join(bad[:3]) + "），已放弃本次合并；请手动处理")
     except Exception as e:
         set_status(False, f"拉取失败：{e}")
 
@@ -510,6 +531,136 @@ def cap_section(text, path, limit=None):
     rest = text[len(cut):]
     n = len(re.findall(r"^- (?:\[ \]|Q-)", rest, re.M))
     return cut + f"\n…（已截断：还有 {n} 条未显示；完整清单见 {path}。注入里优先放在前面的是较新/较要紧的条目）"
+
+
+def rules_lite_text():
+    # 精简规则缺失（如只复制了 kb.py + rules.md 的旧安装方式）时退回完整规则，保证开场规则注入不中断
+    if not os.path.isfile(os.path.join(HERE, "rules-lite.md")):
+        return rules_text()
+    return (read(os.path.join(HERE, "rules-lite.md")).replace("{KB}", KB)
+            .replace("{SCRIPT}", os.path.abspath(__file__))
+            .replace("{RULES_FULL}", os.path.join(HERE, "rules.md")))
+
+
+def section(text, heading):
+    """取 markdown 里某个 `## 标题` 段（到下一个同级标题为止）。"""
+    m = re.search(r"^## " + re.escape(heading) + r".*?$(.*?)(?=^## |\Z)", text, re.M | re.S)
+    return m.group(1).strip() if m else ""
+
+
+def build_context_lite(name, root):
+    """SessionStart 注入：只放规则精简版 + 当前位置 + 一行统计，其余按需用 brief/search 取（省上下文）。"""
+    s = stats(name)
+    parts = [rules_lite_text(),
+             f"\n## 当前位置\n- 当前项目：**{name}**（{os.path.join(PROJ, name)}）"
+             f"：未完成待办 {s['t_open']}，未决问题 {s['q_open']}，纪要 {len(s['disc'])}，决议 {len(s['dec'])}，最近 {s['last']}\n"
+             f"- 需要项目背景时再运行 brief，别预先读。"]
+    warn = []
+    if os.path.exists(BLOCKF):
+        warn.append("⚠ 同步被拦截（疑似密钥），详见 " + BLOCKF)
+    st = load_json(STATUSF, {})
+    if st and not st.get("ok"):
+        warn.append("⚠ 上次同步异常：" + str(st.get("msg"))[:200])
+    if warn:
+        parts.append("\n## 同步警告（请先简短告知用户）\n" + "\n".join(warn))
+    return "\n".join(parts)
+
+
+def brief(name):
+    d = os.path.join(PROJ, name)
+    if not os.path.isdir(d):
+        print(f"没有项目 {name}；现有：{', '.join(all_projects())}")
+        return
+    readme = re.sub(r"<!-- AUTO:BEGIN.*?<!-- AUTO:END -->", "", read(os.path.join(d, "README.md")), flags=re.S)
+    out = [f"# {name} 简报（完整内容在 {d}）"]
+    for h in ("项目简介", "当前状态", "关键决议"):
+        body = section(readme, h)
+        if body:
+            out.append(f"\n## {h}\n" + cap_section(body, os.path.join(d, "README.md"), 2500))
+    rows = [r for r in urgent_items(limit=200) if f"**{name}**" in r][:8]
+    if rows:
+        out.append("\n## 最要紧的待办/问题\n" + "\n".join(rows))
+    s = stats(name)
+    out.append(f"\n未完成待办 {s['t_open']}，未决问题 {s['q_open']}；最近纪要：{', '.join(s['disc'][-3:]) or '无'}")
+    print("\n".join(out))
+
+
+# 多机编号（v2.4.0）：多台机器同写一个知识库时，各自取「最大号+1」会撞号（2026-10-15 两机各出一个 T-54）。
+# 新编号带本机前缀：T-<机器>-<n>。n 仍取全库同类最大号+1（新旧格式一起算），所以大致按时间递增；
+# 不同机器即使 n 相同，前缀不同也不会重复。已有的 T-12 等旧编号保持原样、照常可用。
+ID_TAG = r"(?:[a-z][a-z0-9]{0,7}-)?"
+MACHINE_F = os.path.expanduser("~/.ai-kb/machine")
+
+
+def _valid_tag(t):
+    return bool(re.fullmatch(r"[a-z][a-z0-9]{0,7}", t or ""))
+
+
+def machine_tag():
+    """本机前缀：环境变量 AI_KB_MACHINE > ~/.ai-kb/machine > 由主机名生成（取前 4 个字母数字）并存档。
+    存在本机、不进知识库（每台机器各自一个）。"""
+    t = os.environ.get("AI_KB_MACHINE", "").strip().lower()
+    if _valid_tag(t):
+        return t
+    try:
+        t = read(MACHINE_F).strip().lower()
+        if _valid_tag(t):
+            return t
+    except Exception:
+        pass
+    import socket
+    h = re.sub(r"[^a-z0-9]", "", socket.gethostname().lower().replace(".local", ""))
+    h = re.sub(r"^[0-9]+", "", h)[:4] or "m" + hashlib.sha1(socket.gethostname().encode()).hexdigest()[:3]
+    try:
+        os.makedirs(os.path.dirname(MACHINE_F), exist_ok=True)
+        write(MACHINE_F, h + "\n")
+    except Exception:
+        pass
+    return h
+
+
+def next_id(name, kind):
+    files = {"T": "todo.md", "Q": "questions.md"}
+    if kind == "D":
+        p = os.path.join(PROJ, name, "decisions")
+        txt = " ".join(os.listdir(p)) if os.path.isdir(p) else ""
+    else:
+        try:
+            txt = read(os.path.join(PROJ, name, files[kind]))
+        except Exception:
+            txt = ""
+    nums = [int(x) for x in re.findall(r"\b" + kind + "-" + ID_TAG + r"(\d+)", txt)]
+    return f"{kind}-{machine_tag()}-{max(nums, default=0) + 1}"
+
+
+def append_log(name, text):
+    write(os.path.join(PROJ, name, "log.md"), f"- {today} | {text}\n", "a")
+
+
+def insert_before(path, heading, line):
+    """把一行插到 heading（如 `## 已完成`）之前；找不到就追加到末尾。只插入，不改动已有内容。"""
+    txt = read(path)
+    i = txt.find("\n" + heading)
+    if i < 0:
+        txt = txt.rstrip("\n") + "\n" + line + "\n"
+    else:
+        head = txt[:i].rstrip("\n")
+        txt = head + "\n" + line + "\n\n" + txt[i + 1:]
+    write(path, txt)
+
+
+def add_item(name, kind, body):
+    if not os.path.isdir(os.path.join(PROJ, name)):
+        print(f"没有项目 {name}")
+        return
+    nid = next_id(name, kind)
+    if kind == "T":
+        insert_before(os.path.join(PROJ, name, "todo.md"), "## 已完成", f"- [ ] {nid} {body} · {today}")
+        append_log(name, f"新增待办 | {nid} | {body[:60]}")
+    else:
+        insert_before(os.path.join(PROJ, name, "questions.md"), "## 已决议", f"- {nid} {body} — 提出 {today} · 最近触及 {today}")
+        append_log(name, f"新增问题 | {nid} | {body[:60]}")
+    print(nid)
 
 
 def build_context(name, root):
@@ -560,12 +711,12 @@ def urgent_items(limit=8):
         except Exception:
             continue
         for l in open_part(todo, "## 已完成").splitlines():
-            m = re.match(r"- \[ \] (T-\d+) \[([^|]+)\|([^\]]+)\] (.*)", l)
+            m = re.match(r"- \[ \] (T-" + ID_TAG + r"\d+) \[([^|]+)\|([^\]]+)\] (.*)", l)
             if m:
                 todo_rows.append((PRIO_ORDER.get(m.group(3).strip(), 3), m.group(1),
                                   name, m.group(3).strip(), m.group(2).strip(), m.group(4)))
         for l in open_part(ques, "## 已决议").splitlines():
-            m = re.match(r"- (Q-\d+) \[(待讨论|讨论中)\] (.*)", l)
+            m = re.match(r"- (Q-" + ID_TAG + r"\d+) \[(待讨论|讨论中)\] (.*)", l)
             if m:
                 # 用户说了「挂起 / 后续再说 / 后续再看」的直接降级，避免反复催
                 suspended = any(k in m.group(3) for k in ("挂起", "后续再说", "后续再看", "暂不催"))
@@ -992,12 +1143,202 @@ def cmd_audit():
 
 
 # ---------- 主流程 ----------
+RECORD_HELP = """用法: kb.py record <项目> <<'KB'
+@@discussion 主题            纪要正文（下面多行）；同日同主题的文件已存在则追加到末尾
+@@decision 标题 | 一句话结论   决议正文（下面多行）；自动编号 D-<本机>-n、建文件、README「关键决议」加一行
+@@todo [类型|优先级] 内容 — 来源
+@@q [待讨论] 问题 — 来源
+@@done T-12 完成说明           勾掉待办并移到「已完成」
+@@resolve Q-3 结论或 → D-5     问题标为已决议并移到「已决议」
+@@artifact 源文件路径 | 说明 | 来源纪要   复制进 artifacts/ 并登记 INDEX.md
+@@log 动作 | 条目ID | 说明
+KB
+先整体校验（字段、编号是否存在、密钥扫描），有任何错误则一条都不写并列出错误；全部通过才写入。"""
+
+
+def _slug(t, n=20):
+    return re.sub(r"[\\\\/:*?\"<>|\s]+", "", t)[:n] or "未命名"
+
+
+def _move_line(path, prefix, new_line, heading):
+    """把以 prefix 开头的那一行改写为 new_line，并移到 heading 下第一行（只移动，不丢内容）。"""
+    lines = read(path).split("\n")
+    idx = [i for i, l in enumerate(lines) if l.startswith(prefix)]
+    old = lines.pop(idx[0])
+    h = lines.index(heading)
+    lines.insert(h + 1, new_line)
+    write(path, "\n".join(lines))
+    return old
+
+
+def record(name, text):
+    d = os.path.join(PROJ, name)
+    if not os.path.isdir(d):
+        print(f"没有项目 {name}")
+        return 1
+    items, cur = [], None
+    for line in text.splitlines():
+        m = re.match(r"^@@(\w+)\s*(.*)$", line)
+        if m:
+            cur = [m.group(1).lower(), m.group(2).strip(), []]
+            items.append(cur)
+        elif cur:
+            cur[2].append(line)
+        elif line.strip():
+            print(f"错误：第一条 @@ 标记之前有内容：{line[:40]}")
+            return 1
+    if not items:
+        print(RECORD_HELP)
+        return 1
+    # ---------- 先整体校验，任何错误都不写 ----------
+    errs, todo_p, q_p = [], os.path.join(d, "todo.md"), os.path.join(d, "questions.md")
+    for kind, head, body in items:
+        tag = f"@@{kind} {head[:30]}"
+        if kind not in ("discussion", "decision", "todo", "q", "done", "resolve", "artifact", "log"):
+            errs.append(f"{tag}：未知类型")
+            continue
+        if not head:
+            errs.append(f"{tag}：标记行后面缺内容")
+        if kind in ("discussion", "decision") and not "\n".join(body).strip():
+            errs.append(f"{tag}：缺正文")
+        if kind == "decision" and "|" not in head:
+            errs.append(f"{tag}：格式应为「标题 | 一句话结论」")
+        if kind == "done":
+            tid = head.split()[0] if head else ""
+            if not re.search(r"^- \[ \] " + re.escape(tid) + r" ", open_part(read(todo_p), "## 已完成"), re.M):
+                errs.append(f"{tag}：未完成区找不到 {tid}")
+        if kind == "resolve":
+            qid = head.split()[0] if head else ""
+            if not re.search(r"^- " + re.escape(qid) + r" ", open_part(read(q_p), "## 已决议"), re.M):
+                errs.append(f"{tag}：未决区找不到 {qid}")
+        if kind == "artifact":
+            src = os.path.expanduser(head.split("|")[0].strip())
+            if not os.path.isfile(src):
+                errs.append(f"{tag}：源文件不存在")
+        for l in [head] + body:
+            if hits_secret(l):
+                errs.append(f"{tag}：命中密钥扫描（改用 <TOKEN>）：{l[:40]}")
+                break
+    if errs:
+        print("未写入任何内容，请修正后重试：\n" + "\n".join("- " + e for e in errs))
+        return 1
+    # ---------- 写入 ----------
+    done = []
+    for kind, head, body in items:
+        content = "\n".join(body).strip("\n")
+        if kind == "discussion":
+            rel = f"discussions/{today}-{_slug(head, 40)}.md"
+            fp = os.path.join(d, rel)
+            if os.path.exists(fp):
+                write(fp, "\n\n" + content + "\n", "a")
+                append_log(name, f"补充纪要 | - | {rel}")
+            else:
+                write(fp, (content if content.startswith("# ") else f"# {head}（{today}）\n\n{content}") + "\n")
+                append_log(name, f"新增纪要 | - | {rel}")
+            done.append(rel)
+        elif kind == "decision":
+            title, summary = [x.strip() for x in head.split("|", 1)]
+            nid = next_id(name, "D")
+            rel = f"decisions/{nid}-{_slug(title)}.md"
+            write(os.path.join(d, rel), (content if content.startswith("# ") else f"# {nid} {title}（{today}）\n\n{content}") + "\n")
+            rp = os.path.join(d, "README.md")
+            lines = read(rp).split("\n")
+            if "## 关键决议" in lines:
+                h = lines.index("## 关键决议")
+                if h + 1 < len(lines) and lines[h + 1].startswith("（每条一行"):
+                    h += 1
+                lines.insert(h + 1, f"- {nid} {title} —— {summary}（{today}）")
+                write(rp, "\n".join(lines))
+            append_log(name, f"新增决议 | {nid} | {title[:60]}")
+            done.append(nid)
+        elif kind in ("todo", "q"):
+            nid = next_id(name, "T" if kind == "todo" else "Q")
+            if kind == "todo":
+                insert_before(todo_p, "## 已完成", f"- [ ] {nid} {head} · {today}")
+                append_log(name, f"新增待办 | {nid} | {head[:60]}")
+            else:
+                insert_before(q_p, "## 已决议", f"- {nid} {head} — 提出 {today} · 最近触及 {today}")
+                append_log(name, f"新增问题 | {nid} | {head[:60]}")
+            done.append(nid)
+        elif kind == "done":
+            tid, _, note = head.partition(" ")
+            old = read(todo_p)
+            line = next(l for l in old.split("\n") if l.startswith(f"- [ ] {tid} "))
+            _move_line(todo_p, f"- [ ] {tid} ", line.replace("- [ ]", "- [x]", 1) + f" · 完成 {today}" + (f"（{note.strip()}）" if note.strip() else ""), "## 已完成")
+            append_log(name, f"完成待办 | {tid} | {note.strip()[:60]}")
+            done.append(f"{tid}✓")
+        elif kind == "resolve":
+            qid, _, note = head.partition(" ")
+            line = next(l for l in open_part(read(q_p), "## 已决议").split("\n") if l.startswith(f"- {qid} "))
+            new = re.sub(r"\[(待讨论|讨论中)\]", "[已决议]", line, count=1) + ((" " if note.strip().startswith("→") else " → ") + note.strip() if note.strip() else "")
+            _move_line(q_p, f"- {qid} ", new, "## 已决议")
+            append_log(name, f"问题已决议 | {qid} | {note.strip()[:60]}")
+            done.append(f"{qid}✓")
+        elif kind == "artifact":
+            parts = [x.strip() for x in head.split("|")]
+            src = os.path.expanduser(parts[0])
+            base = os.path.basename(src)
+            if not re.match(r"\d{4}-\d{2}-\d{2}", base):
+                base = f"{today}-{base}"
+            dst = os.path.join(d, "artifacts", base)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            if os.path.exists(dst):
+                stem, ext = os.path.splitext(base)
+                base = f"{stem}-{time.strftime('%H%M%S')}{ext}"
+                dst = os.path.join(d, "artifacts", base)
+            shutil.copy2(src, dst)
+            ip = os.path.join(d, "artifacts", "INDEX.md")
+            if not os.path.exists(ip):
+                write(ip, tpl_artifacts_index(name))
+            desc = parts[1] if len(parts) > 1 else ""
+            srcd = f" · 来源 {parts[2]}" if len(parts) > 2 and parts[2] else ""
+            write(ip, f"- [{base}]({base}) — {desc} · 生成于 {today}{srcd}\n", "a")
+            append_log(name, f"新增产物 | - | artifacts/{base}")
+            done.append(f"artifacts/{base}")
+        else:
+            append_log(name, head)
+    n = sum(1 for k, _, _ in items if k != "log")
+    print(f"已写入 {n} 条：" + "、".join(done) + (f"；日志 {sum(1 for k, _, _ in items if k == 'log')} 行" if any(k == "log" for k, _, _ in items) else ""))
+    return 0
+
+
 def main():
     if mode == "_push":
         do_push()
         return
     if mode == "search":
         search(sys.argv[2:])
+        return
+    if mode == "machine":
+        a = sys.argv[2:]
+        if a:
+            t = a[0].strip().lower()
+            if not _valid_tag(t):
+                print("前缀须为小写字母开头、1-8 位字母数字，如 mac、wjt")
+                sys.exit(1)
+            os.makedirs(os.path.dirname(MACHINE_F), exist_ok=True)
+            write(MACHINE_F, t + "\n")
+        print(f"本机编号前缀：{machine_tag()}（新编号形如 T-{machine_tag()}-70；存于 {MACHINE_F}，不进知识库）")
+        return
+    if mode == "record":
+        if len(sys.argv) < 3 or sys.stdin.isatty():
+            print(RECORD_HELP)
+            sys.exit(1)
+        sys.exit(record(sys.argv[2], sys.stdin.read()))
+    if mode in ("brief", "next-id", "add-todo", "add-q", "log"):
+        a = sys.argv[2:]
+        if mode == "brief":
+            brief(a[0] if a else project(os.getcwd(), persist=False)[0])
+        elif len(a) < 2:
+            print(f"用法: kb.py {mode} <项目> <内容>")
+        elif mode == "next-id":
+            print(next_id(a[0], a[1].upper()))
+        elif mode == "add-todo":
+            add_item(a[0], "T", " ".join(a[1:]))
+        elif mode == "add-q":
+            add_item(a[0], "Q", " ".join(a[1:]))
+        else:
+            append_log(a[0], " ".join(a[1:]))
         return
     if mode == "audit":
         sys.exit(cmd_audit())
@@ -1047,7 +1388,7 @@ def main():
         build()
         commit(f"snapshot {today}")
         pull()
-        ctx = build_context(name, root)
+        ctx = build_context(name, root) if mode == "context" else build_context_lite(name, root)
         if mode == "context":
             print(ctx)
         else:
@@ -1056,8 +1397,7 @@ def main():
         print(f"压缩摘要必须保留：本次对话中所有尚未写入知识库 {os.path.join(PROJ, name)} 的内容——讨论要点与结论（discussions/）、决议（decisions/）、待办与优化项（todo.md）、"
               f"待讨论问题（questions.md）、生成的产物（artifacts/）——逐条列出，并注明路径；压缩后第一件事是把它们补写进知识库。")
     elif mode == "prompt":
-        print(f"[知识库提醒] 当前项目 {name}，目录 {os.path.join(PROJ, name)}。本轮若有新的讨论要点/结论/决议/待办/优化项/待讨论问题/生成的产物，当轮写入对应文件（讨论纪要需自包含，产物要存原文件并登记 artifacts/INDEX.md），并在 log.md 追加一行；"
-              f"回复末尾标注“已记录 N 条”；无则无需提及。归属拿不准先问用户。")
+        print(f"[知识库] 项目 {name}。有新结论/决议/待办/问题/产物才记录（尽量一次 kb.py record 写完，别 Read 整个 todo/questions/log）；无关就别碰知识库。")
     elif mode == "stop":
         build()
         commit(f"auto {today}")
@@ -1090,11 +1430,11 @@ def main():
                     text_len += len(b.get("text", ""))
                 elif b.get("type") == "tool_use":
                     s = json.dumps(b.get("input", {}), ensure_ascii=False)
-                    if KBNAME in s:
+                    if KBNAME in s or "kb.py" in s:
                         wrote = True
                     elif b.get("name") in ("Edit", "Write", "NotebookEdit"):
                         edited_other = True
-        if not wrote and (text_len > 500 or edited_other):
+        if not wrote and (text_len > 1500 or edited_other):
             print(json.dumps({"decision": "block", "reason":
                   f"知识库检查：本轮内容较多但没有写入知识库（{os.path.join(PROJ, name)}）。若有讨论要点/结论/决议/待办/优化项/待讨论问题/生成的产物未记录，现在写入并在 log.md 追加；"
                   f"若确实没有，回复“本轮无需记录”即可。"}, ensure_ascii=False))

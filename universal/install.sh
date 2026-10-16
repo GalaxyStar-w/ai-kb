@@ -37,7 +37,7 @@ detect_agent() {
 AGENT="$(detect_agent)"
 AGENT_EXPLICIT=0; [ $# -gt 0 ] && case " $* " in *" --agent "*) AGENT_EXPLICIT=1;; esac
 if [ "$DRY_RUN" != "1" ]; then
-  mkdir -p "$DEST"; cp "$HERE/kb.py" "$HERE/rules.md" "$DEST/"; echo "✔ 脚本已安装到 $DEST"
+  mkdir -p "$DEST"; cp "$HERE/kb.py" "$HERE/rules.md" "$HERE/rules-lite.md" "$DEST/"; echo "✔ 脚本已安装到 $DEST"
   if [ -n "$remote" ] && [ ! -d "$KB/.git" ]; then git clone "$remote" "$KB" 2>/dev/null || { mkdir -p "$KB"; git -C "$KB" init -q; git -C "$KB" remote add origin "$remote"; }; fi
   AI_KB_DIR="$KB" python3 "$DEST/kb.py" init
 else

@@ -204,7 +204,7 @@ fi
 step "2/4 安装工具"
 if [ -f "$HERE/universal/kb.py" ]; then
   mkdir -p "$HOME/.ai-kb"
-  cp "$HERE/universal/kb.py" "$HERE/universal/rules.md" "$HOME/.ai-kb/" 2>/dev/null
+  cp "$HERE/universal/kb.py" "$HERE/universal/rules.md" "$HERE/universal/rules-lite.md" "$HOME/.ai-kb/" 2>/dev/null
   [ -f "$HERE/universal/selftest.sh" ] && cp "$HERE/universal/selftest.sh" "$HOME/.ai-kb/"
   ok "已安装到 ~/.ai-kb"
 else
