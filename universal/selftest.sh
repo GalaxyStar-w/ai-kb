@@ -246,6 +246,14 @@ s=importlib.util.spec_from_file_location('kb','$KBPY'); m=importlib.util.module_
 e=m.net_env(); assert 'HTTP_PROXY' not in e and 'https_proxy' not in e
 " 2>/dev/null; ok $? "联网 git 剥掉代理环境变量（net_env，T-43）"
 
+R="${T}/sync"; git init -q --bare "${R}/r.git" && git clone -q "${R}/r.git" "${R}/a" 2>/dev/null && git clone -q "${R}/r.git" "${R}/b" 2>/dev/null
+for d in a b; do git -C "${R}/$d" config user.email t@t; git -C "${R}/$d" config user.name t; done
+mkdir -p "${R}/a/_meta" && echo '{"allow_non_github_remote":true}' > "${R}/a/_meta/config.json" && echo x > "${R}/a/f" && git -C "${R}/a" add -A && git -C "${R}/a" commit -qm i && git -C "${R}/a" push -q -u origin HEAD 2>/dev/null
+git -C "${R}/b" pull -q 2>/dev/null; echo o > "${R}/b/g" && git -C "${R}/b" add -A && git -C "${R}/b" commit -qm other && git -C "${R}/b" push -q 2>/dev/null
+echo l > "${R}/a/h" && git -C "${R}/a" add -A && git -C "${R}/a" commit -qm local
+AI_KB_DIR="${R}/a" python3 "$KBPY" _push </dev/null >/dev/null 2>&1
+[ "$(git -C "${R}/r.git" log --oneline | grep -c 'other\|local')" = 2 ] && grep -q '"ok": true' "${R}/a/_meta/.sync-status.json"; ok $? "本地落后远端时推送：自动拉取合并后重推成功（双方提交都在）"
+
 echo "[10] 一致性"
 python3 "$KBPY" status >/dev/null 2>&1; ok $? "status 可运行"
 echo; echo "自测结果：通过 ${pass}，失败 ${fail}"

@@ -41,7 +41,7 @@ STATUSF = os.path.join(META, ".sync-status.json")
 BLOCKF = os.path.join(META, "SYNC_BLOCKED.md")
 HAS_GIT = shutil.which("git") is not None
 mode = sys.argv[1] if len(sys.argv) > 1 else ""
-VERSION = "2.4.0"
+VERSION = "2.4.1"
 ROOT_CAP_TODO = 15      # 总页每个项目最多列出的未完成待办条数
 ROOT_CAP_Q = 10         # 总页每个项目最多列出的未决问题条数
 CTX_CAP = 9000          # 会话开场注入：待办/问题清单各自的字符上限
@@ -173,7 +173,7 @@ def tpl_artifacts_index(name):
             "> `- [文件名](文件名) — 说明 · 生成于 日期 · 来源 discussions/xxx.md`\n\n")
 
 
-GITIGNORE = ".DS_Store\n_meta/.sync-status.json\n_meta/SYNC_BLOCKED.md\n"
+GITIGNORE = ".DS_Store\n_meta/.sync-status.json\n_meta/SYNC_BLOCKED.md\n_meta/.push.lock\n"
 
 
 def ensure_kb():
@@ -465,9 +465,27 @@ def do_push():
             set_status(False, "已拒绝推送：远程仓库是公开的，请先在 GitHub 改为私有。" if why == "PUBLIC"
                        else f"已拒绝推送：无法确认仓库是私有的（{why}）。")
             return False
-        r = authed_git("push", "-u", "origin", "HEAD", timeout=90)
-        set_status(r.returncode == 0, "推送成功" if r.returncode == 0 else ("推送失败：" + (r.stderr.strip()[-200:])))
-        return r.returncode == 0
+        # 多机/多会话共用：Stop hook 只 commit 不 pull，别处先推过就会被拒（non-fast-forward）。
+        # 被拒时自动 pull（merge，含 README 冲突自动处理）后重推，最多 3 次；加文件锁避免多个后台 _push 同时跑。
+        lockf = open(os.path.join(META, ".push.lock"), "w")
+        try:
+            import fcntl
+            fcntl.flock(lockf, fcntl.LOCK_EX)
+        except ImportError:
+            pass
+        r = None
+        for i in range(3):
+            r = authed_git("push", "-u", "origin", "HEAD", timeout=90)
+            if r.returncode == 0:
+                set_status(True, "推送成功" + (f"（先自动拉取合并 {i} 次）" if i else ""))
+                return True
+            err = r.stderr
+            if not re.search(r"non-fast-forward|fetch first|rejected|behind", err):
+                break  # 认证/网络等其他错误，重试无意义
+            if not pull():
+                return False  # pull 已写入冲突原因
+        set_status(False, "推送失败：" + (r.stderr.strip()[-200:]))
+        return False
     except Exception as e:
         set_status(False, f"推送异常：{e}")
         return False
@@ -482,13 +500,14 @@ def push_bg():
 
 
 def pull():
+    """返回 True=已与远端合并（或无需合并），False=失败（原因写入状态文件）。"""
     if not has_remote():
-        return
+        return True
     try:
         authed_git("fetch", "-q", timeout=30)
         up = git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
         if up.returncode != 0:
-            return
+            return True
         # 多台机器共用一个知识库：用 merge 而不是 rebase（rebase 会把几十个本地提交逐个重放，每个都可能撞 README 冲突）。
         # 只追加的清单靠 .gitattributes 的 merge=union 保留双方；README 的冲突几乎都在脚本生成的 AUTO 区块，自动处理后重新生成。
         r = git("merge", "--no-edit", "-q", "@{u}", timeout=45)
@@ -511,9 +530,12 @@ def pull():
                 git("commit", "-q", "--no-edit")
             else:
                 git("merge", "--abort")
-                set_status(False, "拉取合并冲突（" + "、".join(bad[:3]) + "），已放弃本次合并；请手动处理")
+                set_status(False, "拉取合并冲突（" + "、".join(bad[:3] or [r.stderr.strip()[-120:]]) + "），已放弃本次合并；请手动处理")
+                return False
+        return True
     except Exception as e:
         set_status(False, f"拉取失败：{e}")
+        return False
 
 
 # ---------- 上下文 ----------

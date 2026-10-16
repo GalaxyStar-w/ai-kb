@@ -10,7 +10,7 @@
 换台电脑       → 什么都没有      换台电脑       → git clone 就有了
 ```
 
-版本 **v2.4.0**（更新记录见 [CHANGELOG.md](CHANGELOG.md)）。仅需 `python3` + `git`；加密看板另需 `node`。
+版本 **v2.4.1**（更新记录见 [CHANGELOG.md](CHANGELOG.md)）。仅需 `python3` + `git`；加密看板另需 `node`。
 
 ---
 
